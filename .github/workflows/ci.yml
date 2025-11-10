@@ -1,0 +1,92 @@
+name: CI Pipeline
+
+on:
+  pull_request:
+    branches: [main]
+  push:
+    branches: [main]
+
+jobs:
+  backend-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.14'
+      
+      - name: Cache Python dependencies
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/pip
+          key: ${{ runner.os }}-pip-${{ hashFiles('backend/requirements*.txt') }}
+          restore-keys: |
+            ${{ runner.os }}-pip-
+      
+      - name: Install dependencies
+        run: |
+          cd backend
+          pip install --upgrade pip
+          pip install -r requirements.txt -r requirements-dev.txt
+      
+      - name: Run linter (Ruff)
+        run: |
+          cd backend
+          ruff check .
+      
+      - name: Run type checker (mypy)
+        run: |
+          cd backend
+          mypy app --ignore-missing-imports
+      
+      - name: Run tests with coverage
+        run: |
+          cd backend
+          pytest --cov=app --cov-report=term --cov-report=xml --cov-fail-under=80
+      
+      - name: Run security scanner (Bandit)
+        run: |
+          cd backend
+          bandit -r app -ll
+
+  frontend-tests:
+    runs-on: ubuntu-latest
+    
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: '20'
+      
+      - name: Cache node modules
+        uses: actions/cache@v4
+        with:
+          path: frontend/node_modules
+          key: ${{ runner.os }}-node-${{ hashFiles('frontend/package-lock.json') }}
+          restore-keys: |
+            ${{ runner.os }}-node-
+      
+      - name: Install dependencies
+        run: |
+          cd frontend
+          npm ci
+      
+      - name: Run linter (ESLint)
+        run: |
+          cd frontend
+          npm run lint
+      
+      - name: Run type checker (TypeScript)
+        run: |
+          cd frontend
+          npm run type-check
+      
+      - name: Build
+        run: |
+          cd frontend
+          npm run build
