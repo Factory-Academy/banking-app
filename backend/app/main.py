@@ -29,5 +29,6 @@ def root():
 
 
 @app.get("/health")
-def health():
+def health() -> dict[str, str]:
+    """Return the API health status for uptime checks."""
     return {"status": "healthy"}
