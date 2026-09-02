@@ -26,3 +26,8 @@ def test_retry_raises_after_exhausting_attempts():
 
     with pytest.raises(ValueError):
         retry(always_fails, attempts=2, retry_on=ValueError)
+
+
+def test_retry_rejects_empty_retry_on_tuple():
+    with pytest.raises(ValueError, match="retry_on must not be an empty tuple"):
+        retry(lambda: "ok", retry_on=())
