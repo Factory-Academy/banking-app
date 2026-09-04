@@ -16,8 +16,19 @@ from app.schemas.transaction import (
     AccountStats
 )
 from app.services.fraud_detection import FraudDetectionService
+from app.events import (
+    event_bus,
+    TransactionCreated,
+    TransactionHeld,
+    TransactionReviewed,
+)
 
 router = APIRouter(prefix="/api/v1/transactions", tags=["transactions"])
+
+
+def _enum_value(value) -> str:
+    """Normalize an enum-or-string column value to its string form."""
+    return value.value if hasattr(value, "value") else str(value)
 
 
 @router.post("", response_model=TransactionResponse, status_code=201)
@@ -55,6 +66,27 @@ def create_transaction(
     db.add(new_txn)
     db.commit()
     db.refresh(new_txn)
+    
+    # Announce the outcome. Handler failures are isolated by the bus, so a
+    # misbehaving subscriber can never fail the transaction that was persisted.
+    flags = list(new_txn.fraud_flags or [])
+    event_bus.publish(TransactionCreated(
+        transaction_id=new_txn.id,
+        account_number=new_txn.account_number,
+        amount=Decimal(str(new_txn.amount)),
+        risk_score=new_txn.risk_score,
+        risk_level=_enum_value(new_txn.risk_level),
+        status=_enum_value(new_txn.status),
+        fraud_flags=flags,
+    ))
+    if new_txn.status == TransactionStatus.HELD:
+        event_bus.publish(TransactionHeld(
+            transaction_id=new_txn.id,
+            account_number=new_txn.account_number,
+            amount=Decimal(str(new_txn.amount)),
+            risk_score=new_txn.risk_score,
+            fraud_flags=flags,
+        ))
     
     return new_txn
 
@@ -219,6 +251,8 @@ def review_transaction(
             detail="Decision must be APPROVED, REJECTED, or ESCALATED"
         )
     
+    previous_status = _enum_value(transaction.status)
+    
     # Update transaction
     transaction.status = review.decision
     transaction.reviewed_by = review.reviewed_by
@@ -228,5 +262,14 @@ def review_transaction(
     
     db.commit()
     db.refresh(transaction)
+    
+    event_bus.publish(TransactionReviewed(
+        transaction_id=transaction.id,
+        account_number=transaction.account_number,
+        decision=_enum_value(transaction.status),
+        reviewed_by=transaction.reviewed_by,
+        previous_status=previous_status,
+        notes=transaction.review_notes,
+    ))
     
     return transaction
