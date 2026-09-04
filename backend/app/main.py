@@ -3,9 +3,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from app.database import engine, Base
 from app.routes import transactions_router, stats_router
 from app.config import settings
+from app.events import event_bus, register_default_subscribers
 
 # Create database tables
 Base.metadata.create_all(bind=engine)
+
+# Wire the built-in audit subscribers onto the process-wide event bus.
+register_default_subscribers(event_bus)
 
 app = FastAPI(title=settings.app_name, debug=settings.debug)
 
