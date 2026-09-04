@@ -5,13 +5,15 @@ import { ReviewModal } from '@/components/ReviewModal';
 import { Transaction, TransactionStatus, RiskLevel } from '@/types/transaction';
 
 export function getPaginationRange(page: number, limit: number, total: number): { start: number; end: number } {
-  if (total === 0) {
+  if (total <= 0 || limit <= 0) {
     return { start: 0, end: 0 };
   }
 
+  const safePage = Math.max(0, Math.min(page, Math.floor((total - 1) / limit)));
+
   return {
-    start: page * limit + 1,
-    end: Math.min((page + 1) * limit, total),
+    start: safePage * limit + 1,
+    end: Math.min((safePage + 1) * limit, total),
   };
 }
 
