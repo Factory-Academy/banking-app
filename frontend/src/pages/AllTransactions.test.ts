@@ -13,4 +13,8 @@ describe('getPaginationDisplayRange', () => {
   it('caps the end at total for the last partial page', () => {
     expect(getPaginationDisplayRange(2, 50, 120)).toEqual({ start: 101, end: 120 });
   });
+
+  it('returns 0-0 when the page is out of range', () => {
+    expect(getPaginationDisplayRange(3, 50, 120)).toEqual({ start: 0, end: 0 });
+  });
 });
