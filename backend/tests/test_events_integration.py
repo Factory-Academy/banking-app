@@ -53,6 +53,8 @@ def test_create_transaction_publishes_created_event(client, captured_events):
     assert len(created) == 1
     assert created[0].transaction_id == txn_id
     assert created[0].amount == Decimal("100.00")
+    # The event carries an immutable snapshot of the flags, not the ORM list.
+    assert isinstance(created[0].fraud_flags, tuple)
 
 
 def test_low_risk_transaction_does_not_publish_held_event(client, captured_events):

@@ -75,13 +75,26 @@ returns the number that completed without raising.
   subscriber cannot break the flow that published the event.
 - **Idempotent subscribe** – registering the same handler for the same event
   type twice is a no-op; it will not receive duplicate deliveries.
+- **At most once per publish across the hierarchy** – dispatch walks the
+  event's MRO, but a handler registered for both a class and one of its bases
+  (for example both `TransactionCreated` and the catch-all `Event`) is invoked
+  only once per publish. Handlers still run most-specific-type first.
 - **Safe mutation during dispatch** – handlers are delivered from a snapshot,
   so a handler may subscribe or unsubscribe while an event is being published.
   Such changes only affect later publishes.
 - **Thread-safe** – all registry access is guarded by a re-entrant lock, which
   matters because FastAPI may serve requests on multiple worker threads.
-- **Immutable events** – events are frozen dataclasses; a subscriber cannot
-  mutate an event and affect another subscriber.
+- **Immutable events** – events are frozen dataclasses, and list-valued
+  payloads such as `fraud_flags` are copied into a tuple on construction, so a
+  subscriber cannot mutate an event (or the list a publisher handed in) and
+  affect another subscriber.
+- **Fail-fast validation** – the bus rejects a non-`Event` type or a
+  non-callable handler with `TypeError`, and `publish` rejects a non-`Event`
+  argument. Events themselves reject blank identifiers and negative risk
+  scores with `ValueError`, surfacing publisher bugs at the call site instead
+  of inside a subscriber.
+- **Targeted teardown** – `clear()` removes every subscription, while
+  `clear(EventType)` removes only the handlers registered for that exact type.
 
 ## Integration points
 

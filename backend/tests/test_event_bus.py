@@ -127,6 +127,15 @@ class TestSubscriptionManagement:
         assert bus.subscriber_count(TransactionCreated) == 0
         assert bus.subscriber_count(TransactionReviewed) == 0
 
+    def test_clear_specific_event_type_leaves_others(self, bus):
+        bus.subscribe(TransactionCreated, lambda e: None)
+        bus.subscribe(TransactionReviewed, lambda e: None)
+
+        bus.clear(TransactionCreated)
+
+        assert bus.subscriber_count(TransactionCreated) == 0
+        assert bus.subscriber_count(TransactionReviewed) == 1
+
     def test_on_decorator_registers_handler(self, bus):
         received = []
 
@@ -179,6 +188,29 @@ class TestHierarchicalDispatch:
         bus.publish(_created())
 
         assert held == []
+
+    def test_handler_on_base_and_derived_fires_once(self, bus):
+        received = []
+        handler = received.append
+
+        # The same handler is registered for both the concrete type and its
+        # base. A single publish must not deliver to it twice.
+        bus.subscribe(TransactionCreated, handler)
+        bus.subscribe(Event, handler)
+
+        delivered = bus.publish(_created())
+
+        assert len(received) == 1
+        assert delivered == 1
+
+    def test_dispatch_visits_most_specific_type_first(self, bus):
+        order = []
+        bus.subscribe(Event, lambda e: order.append("base"))
+        bus.subscribe(TransactionCreated, lambda e: order.append("specific"))
+
+        bus.publish(_created())
+
+        assert order == ["specific", "base"]
 
 
 class TestErrorIsolation:
@@ -263,3 +295,50 @@ class TestEventValueSemantics:
             transaction_id="TXN-1", decision="APPROVED", reviewed_by="Ann"
         )
         assert event.notes is None
+
+    def test_fraud_flags_are_frozen_into_a_tuple(self):
+        flags = ["high_amount", "geographic_anomaly"]
+        created = TransactionCreated(
+            transaction_id="TXN-1",
+            account_number="**** 1",
+            amount=Decimal("1.00"),
+            risk_score=10,
+            risk_level="LOW",
+            status="CLEARED",
+            fraud_flags=flags,
+        )
+
+        assert created.fraud_flags == ("high_amount", "geographic_anomaly")
+        # Mutating the source list must not leak into the immutable event.
+        flags.append("mutated")
+        assert created.fraud_flags == ("high_amount", "geographic_anomaly")
+
+
+class TestPublishValidation:
+    def test_subscribe_rejects_non_event_type(self, bus):
+        with pytest.raises(TypeError):
+            bus.subscribe(str, lambda e: None)
+
+    def test_subscribe_rejects_non_callable_handler(self, bus):
+        with pytest.raises(TypeError):
+            bus.subscribe(TransactionCreated, "not callable")
+
+    def test_on_rejects_non_event_type(self, bus):
+        with pytest.raises(TypeError):
+            bus.on(object)
+
+    def test_unsubscribe_rejects_non_event_type(self, bus):
+        with pytest.raises(TypeError):
+            bus.unsubscribe(int, lambda e: None)
+
+    def test_subscriber_count_rejects_non_event_type(self, bus):
+        with pytest.raises(TypeError):
+            bus.subscriber_count(dict)
+
+    def test_clear_rejects_non_event_type(self, bus):
+        with pytest.raises(TypeError):
+            bus.clear(list)
+
+    def test_publish_rejects_non_event(self, bus):
+        with pytest.raises(TypeError):
+            bus.publish("not an event")
