@@ -4,6 +4,19 @@ import { TransactionCard } from '@/components/TransactionCard';
 import { ReviewModal } from '@/components/ReviewModal';
 import { Transaction, TransactionStatus, RiskLevel } from '@/types/transaction';
 
+export function getPaginationRange(page: number, limit: number, total: number): { start: number; end: number } {
+  if (total <= 0 || limit <= 0) {
+    return { start: 0, end: 0 };
+  }
+
+  const safePage = Math.max(0, Math.min(page, Math.floor((total - 1) / limit)));
+
+  return {
+    start: safePage * limit + 1,
+    end: Math.min((safePage + 1) * limit, total),
+  };
+}
+
 export function AllTransactions() {
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null);
   const [statusFilter, setStatusFilter] = useState<TransactionStatus | ''>('');
@@ -21,7 +34,9 @@ export function AllTransactions() {
   });
 
   const transactions = data?.transactions || [];
-  const totalPages = Math.ceil((data?.total || 0) / limit);
+  const total = data?.total || 0;
+  const totalPages = Math.ceil(total / limit);
+  const { start, end } = getPaginationRange(page, limit, total);
 
   return (
     <>
@@ -109,7 +124,7 @@ export function AllTransactions() {
       ) : (
         <>
           <div className="mb-4 text-sm text-gray-600">
-            Showing {page * limit + 1}-{Math.min((page + 1) * limit, data?.total || 0)} of {data?.total || 0} transactions
+            Showing {start}-{end} of {total} transactions
           </div>
           
           <div className="grid gap-4">
