@@ -11,6 +11,7 @@ from app.services.fraud_detection import (
     FirstInternationalRule,
     AmountDeviationRule
 )
+from app.utils.feature_flags import FeatureFlags
 
 
 @pytest.fixture
@@ -359,3 +360,36 @@ class TestFraudDetectionService:
         assert result["risk_level"] == RiskLevel.MEDIUM
         assert result["status"] == TransactionStatus.CLEARED
         assert 40 <= result["risk_score"] < 70
+
+    def test_amount_deviation_rule_can_be_disabled_with_feature_flag(self, base_transaction):
+        base_transaction.amount = Decimal("3000.00")
+        base_transaction.location_country = "CN"
+
+        history = [
+            Transaction(
+                id=f"TXN-{i}",
+                account_number=base_transaction.account_number,
+                account_holder_name=base_transaction.account_holder_name,
+                amount=Decimal("300.00"),
+                merchant_name="Merchant",
+                merchant_category="Retail",
+                transaction_type="CARD",
+                location_city="New York",
+                location_country="US",
+                timestamp=datetime.utcnow() - timedelta(days=i),
+                status=TransactionStatus.CLEARED,
+                risk_level=RiskLevel.LOW,
+                risk_score=0,
+                fraud_flags=[]
+            )
+            for i in range(10)
+        ]
+
+        feature_flags = FeatureFlags(env={"FEATURE_FRAUD_AMOUNT_DEVIATION_RULE": "false"})
+        service = FraudDetectionService(feature_flags=feature_flags)
+        result = service.analyze_transaction(base_transaction, history)
+
+        assert result["risk_score"] == 25
+        assert result["risk_level"] == RiskLevel.LOW
+        assert "first_international" in result["fraud_flags"]
+        assert "amount_deviation" not in result["fraud_flags"]

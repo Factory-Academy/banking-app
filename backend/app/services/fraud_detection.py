@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import List, Dict, Any
 from abc import ABC, abstractmethod
 from app.models.transaction import Transaction, TransactionStatus, RiskLevel
+from app.utils.feature_flags import FeatureFlags
 from math import radians, sin, cos, sqrt, atan2
 
 
@@ -139,15 +140,17 @@ class AmountDeviationRule(FraudRule):
 class FraudDetectionService:
     """Service for detecting fraudulent transactions"""
     
-    def __init__(self):
+    def __init__(self, feature_flags: FeatureFlags | None = None):
+        self.feature_flags = feature_flags or FeatureFlags()
         self.rules: List[FraudRule] = [
             HighAmountRule(),
             VelocityRule(),
             GeographicAnomalyRule(),
             UnusualTimeRule(),
-            FirstInternationalRule(),
-            AmountDeviationRule()
+            FirstInternationalRule()
         ]
+        if self.feature_flags.enabled("fraud_amount_deviation_rule", default=True):
+            self.rules.append(AmountDeviationRule())
     
     def analyze_transaction(
         self,
