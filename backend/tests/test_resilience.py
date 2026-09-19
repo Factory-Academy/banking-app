@@ -99,6 +99,24 @@ class TestBackoffPolicy:
         assert policy.compute_delay(1) == 0.0
         assert policy.compute_delay(5) == 0.0
 
+    def test_zero_base_delay_never_becomes_nan_for_large_attempt(self):
+        # 0.0 * (multiplier ** huge) would be 0 * inf == nan without a guard.
+        policy = BackoffPolicy(base_delay=0.0, multiplier=2.0, jitter=False)
+        assert policy.compute_delay(5000) == 0.0
+
+    def test_large_attempt_caps_at_max_delay_without_overflow(self):
+        # multiplier ** (attempt - 1) overflows float range for large attempts;
+        # compute_delay must return the cap rather than raise OverflowError.
+        policy = BackoffPolicy(base_delay=0.5, multiplier=2.0, max_delay=8.0, jitter=False)
+        assert policy.compute_delay(5000) == 8.0
+
+    def test_large_attempt_caps_at_max_delay_with_jitter(self):
+        policy = BackoffPolicy(base_delay=0.5, multiplier=2.0, max_delay=8.0, jitter=True)
+        rng = random.Random(99)
+        for _ in range(50):
+            delay = policy.compute_delay(5000, rng)
+            assert 0.0 <= delay <= 8.0
+
     @pytest.mark.parametrize(
         "kwargs",
         [
@@ -229,6 +247,53 @@ class TestCircuitBreaker:
         cb.reset()
         assert cb.state is CircuitState.CLOSED
 
+    def test_release_frees_a_reserved_half_open_slot(self):
+        clock = FakeClock()
+        cb = CircuitBreaker(
+            failure_threshold=1,
+            recovery_timeout=5.0,
+            half_open_max_calls=1,
+            time_func=clock,
+        )
+        cb.record_failure()
+        clock.advance(5.0)
+        assert cb.state is CircuitState.HALF_OPEN
+
+        cb.check()  # reserve the only trial slot
+        cb.release()  # outcome never recorded -> give the slot back
+        cb.check()  # slot is available again rather than starved forever
+
+    def test_release_is_a_noop_when_closed(self):
+        cb = CircuitBreaker(failure_threshold=2)
+        cb.release()  # nothing reserved; must not raise or corrupt state
+        assert cb.state is CircuitState.CLOSED
+        cb.record_failure()
+        assert cb.failure_count == 1
+
+    def test_half_open_recovers_when_max_calls_below_success_threshold(self):
+        # With one trial slot but two required successes, the slot must be
+        # freed after each success so the second probe can proceed; otherwise
+        # the breaker would be permanently stuck half-open.
+        clock = FakeClock()
+        cb = CircuitBreaker(
+            failure_threshold=1,
+            recovery_timeout=5.0,
+            success_threshold=2,
+            half_open_max_calls=1,
+            time_func=clock,
+        )
+        cb.record_failure()
+        clock.advance(5.0)
+        assert cb.state is CircuitState.HALF_OPEN
+
+        cb.check()
+        cb.record_success()
+        assert cb.state is CircuitState.HALF_OPEN
+
+        cb.check()  # slot freed by the previous success
+        cb.record_success()
+        assert cb.state is CircuitState.CLOSED
+
     @pytest.mark.parametrize(
         "kwargs",
         [
@@ -316,6 +381,34 @@ class TestResilientCaller:
         with pytest.raises(PermanentError):
             caller.call(func)
 
+        assert breaker.state is CircuitState.CLOSED
+
+    def test_non_retryable_in_half_open_releases_trial_slot(self):
+        # A non-transient error escapes without being recorded against the
+        # breaker. The half-open trial slot it reserved must still be freed so
+        # a genuine recovery probe can follow.
+        clock = FakeClock()
+        breaker = CircuitBreaker(
+            failure_threshold=1,
+            recovery_timeout=5.0,
+            half_open_max_calls=1,
+            time_func=clock,
+        )
+        breaker.record_failure()
+        clock.advance(5.0)
+        assert breaker.state is CircuitState.HALF_OPEN
+
+        caller, _ = make_caller(breaker=breaker)
+
+        def boom():
+            raise PermanentError("not transient")
+
+        with pytest.raises(PermanentError):
+            caller.call(boom)
+
+        # The slot is available again: a follow-up trial call is admitted and
+        # can succeed, closing the breaker.
+        assert caller.call(lambda: "ok") == "ok"
         assert breaker.state is CircuitState.CLOSED
 
     def test_jitter_delays_use_injected_rng(self):

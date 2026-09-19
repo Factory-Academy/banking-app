@@ -16,6 +16,19 @@ def _response(status_code: int, *, json=None, text: str = ""):
     return httpx.Response(status_code, text=text, request=request)
 
 
+class FakeClock:
+    """A manually advanced monotonic clock for deterministic time control."""
+
+    def __init__(self, start: float = 0.0):
+        self.now = start
+
+    def __call__(self) -> float:
+        return self.now
+
+    def advance(self, seconds: float) -> None:
+        self.now += seconds
+
+
 class ScriptedClient:
     """Fake httpx client that replays a queue of responses/exceptions."""
 
@@ -124,3 +137,44 @@ def test_open_circuit_stops_hammering_the_api(generator):
     with pytest.raises(SystemExit):
         generator.create_transaction_via_api(PAYLOAD)
     assert generator.client.post_calls == before
+
+
+def test_breaker_recovers_and_resumes_after_timeout(generator):
+    # Single attempt per call and a threshold of two: two failed calls trip the
+    # breaker, then after the recovery timeout a healthy probe closes it again.
+    clock = FakeClock()
+    generator._caller = ResilientCaller(
+        policy=BackoffPolicy(max_attempts=1, base_delay=0.1, jitter=False),
+        breaker=CircuitBreaker(
+            failure_threshold=2,
+            recovery_timeout=10.0,
+            half_open_max_calls=1,
+            time_func=clock,
+        ),
+        retryable_exceptions=(TransientAPIError, httpx.TransportError),
+        sleep_func=lambda _: None,
+    )
+    generator.client = ScriptedClient([
+        httpx.ConnectError("down"),
+        httpx.ConnectError("down"),
+        _response(200, json={"id": "TXN-OK"}),
+    ])
+
+    # Two failing calls trip the breaker.
+    with pytest.raises(SystemExit):
+        generator.create_transaction_via_api(PAYLOAD)
+    with pytest.raises(SystemExit):
+        generator.create_transaction_via_api(PAYLOAD)
+    assert generator.client.post_calls == 2
+
+    # While open, calls are rejected without hitting the client.
+    with pytest.raises(SystemExit):
+        generator.create_transaction_via_api(PAYLOAD)
+    assert generator.client.post_calls == 2
+
+    # After the recovery window, a half-open probe is admitted and succeeds,
+    # so seeding resumes normally.
+    clock.advance(10.0)
+    result = generator.create_transaction_via_api(PAYLOAD)
+    assert result == {"id": "TXN-OK"}
+    assert generator.client.post_calls == 3

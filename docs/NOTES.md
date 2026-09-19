@@ -5,6 +5,20 @@ transient failures. It pairs **retry with exponential backoff** and a
 **circuit breaker** so that flaky dependencies are retried sensibly and a
 genuinely-down dependency is given room to recover instead of being hammered.
 
+## Package layout
+
+The implementation is split into focused, single-responsibility submodules;
+the public names are re-exported from the package root, so existing imports
+(`from app.utils.resilience import BackoffPolicy, ...`) are unchanged.
+
+| Module                        | Responsibility                                   |
+| ----------------------------- | ------------------------------------------------ |
+| `resilience/errors.py`        | Exception hierarchy                              |
+| `resilience/backoff.py`       | `BackoffPolicy` delay computation               |
+| `resilience/breaker.py`       | `CircuitState`, `CircuitBreaker`                |
+| `resilience/caller.py`        | `ResilientCaller`, `@resilient`                 |
+| `resilience/__init__.py`      | Re-exports the public API                        |
+
 ## Why
 
 The seed script (`app/utils/seed_data.py`) fires thousands of `POST`
@@ -47,9 +61,13 @@ A thread-safe breaker with three states:
 - **OPEN** — calls are rejected instantly with `CircuitBreakerOpenError`
   (which carries a `retry_after` hint). After `recovery_timeout` seconds the
   breaker moves to **HALF_OPEN**.
-- **HALF_OPEN** — up to `half_open_max_calls` trial calls are allowed.
-  `success_threshold` consecutive successes close the breaker; any failure
-  reopens it.
+- **HALF_OPEN** — up to `half_open_max_calls` trial calls may be *in flight at
+  once*. `success_threshold` successes close the breaker; any failure reopens
+  it. A slot is reserved by `check()` and released when the call resolves
+  (`record_success`, `record_failure`, or `release`), so the budget tracks
+  concurrent probes rather than total probes. This means a config where
+  `half_open_max_calls < success_threshold` still recovers instead of
+  deadlocking, and an unresolved probe never permanently consumes a slot.
 
 Time is read through an injectable `time_func` (defaults to
 `time.monotonic`), so recovery timing is fully controllable in tests.
@@ -117,8 +135,14 @@ transaction `POST` through it:
 - **Server errors (`5xx`)** are retried; **client errors (`4xx`)** are not.
 - **First-attempt success** performs no sleeps.
 - **Backoff caps** at `max_delay`; **jitter** never produces negative delays.
+- **Very large attempt counts** never raise: `multiplier ** (attempt - 1)` can
+  overflow the float range, so `compute_delay` traps the overflow and returns
+  `max_delay` instead of propagating `OverflowError` into the retry loop.
+- **Zero `base_delay`** always yields `0.0`, even for huge attempts, avoiding
+  the `0 * inf -> nan` trap.
 - **Non-transient exceptions** short-circuit immediately and never affect the
-  breaker.
+  breaker — and any half-open trial slot they reserved is released, so a
+  non-transient failure during recovery does not starve future probes.
 - **Half-open trials** are limited so a recovering dependency is probed
   gently, and a single failure during recovery reopens the breaker.
 
@@ -126,12 +150,15 @@ transaction `POST` through it:
 
 - `tests/test_resilience.py` — unit tests for `BackoffPolicy`,
   `CircuitBreaker`, `ResilientCaller`, and the `@resilient` decorator,
-  including growth/capping, jitter bounds, state transitions, recovery
-  timing (via a fake clock), retry accounting, and error wrapping.
+  including growth/capping, jitter bounds, overflow/`nan` guards for large
+  attempts, state transitions, recovery timing (via a fake clock),
+  half-open slot release and recovery when `half_open_max_calls <
+  success_threshold`, retry accounting, and error wrapping.
 - `tests/test_seed_resilience.py` — integration tests for the wired seed
   client using a scripted fake HTTP client: transient retry-then-succeed,
-  timeout retry, `5xx` retry, `4xx` fast-fail, retry exhaustion, and the
-  breaker halting requests once the API looks down.
+  timeout retry, `5xx` retry, `4xx` fast-fail, retry exhaustion, the breaker
+  halting requests once the API looks down, and recovery resuming seeding
+  after the recovery timeout elapses.
 
 Run just these suites:
 
