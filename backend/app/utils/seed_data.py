@@ -5,6 +5,19 @@ from typing import List, Dict, Any
 import httpx
 import sys
 
+from app.utils.resilience import (
+    BackoffPolicy,
+    CircuitBreaker,
+    CircuitBreakerOpenError,
+    MaxRetriesExceededError,
+    ResilientCaller,
+)
+
+
+class TransientAPIError(Exception):
+    """Raised for retryable server-side (5xx) API responses."""
+
+
 # Sample data
 FIRST_NAMES = ["John", "Sarah", "Michael", "Emily", "David", "Lisa", "James", "Jennifer", "Robert", "Mary",
                "William", "Patricia", "Richard", "Linda", "Joseph", "Barbara", "Thomas", "Elizabeth", "Charles", "Susan"]
@@ -69,6 +82,23 @@ class DataGenerator:
         self.api_url = api_url
         self.client = httpx.Client(timeout=30.0)
         self.transaction_counter = 1
+
+        # Seeding fires thousands of POSTs at a freshly started backend, so
+        # transient connection resets, timeouts and 5xx responses are common.
+        # Retry those with exponential backoff, and stop hammering the API if
+        # it looks genuinely down.
+        self._caller = ResilientCaller(
+            policy=BackoffPolicy(
+                max_attempts=4,
+                base_delay=0.5,
+                max_delay=8.0,
+            ),
+            breaker=CircuitBreaker(
+                failure_threshold=8,
+                recovery_timeout=15.0,
+            ),
+            retryable_exceptions=(TransientAPIError, httpx.TransportError),
+        )
         
     def generate_account_number(self, account_id: int) -> str:
         """Generate masked account number"""
@@ -115,20 +145,47 @@ class DataGenerator:
             "timestamp": timestamp.isoformat()
         }
     
-    def create_transaction_via_api(self, transaction_data: Dict[str, Any]) -> Dict[str, Any]:
-        """Post transaction to API endpoint"""
-        try:
-            response = self.client.post(
-                f"{self.api_url}/transactions",
-                json=transaction_data
+    def _post_transaction(self, transaction_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Send a single transaction POST.
+
+        Server-side (5xx) failures are re-raised as ``TransientAPIError`` so
+        the resilient caller retries them, while client-side (4xx) responses
+        surface as ``httpx.HTTPStatusError`` and are treated as permanent.
+        """
+        response = self.client.post(
+            f"{self.api_url}/transactions",
+            json=transaction_data
+        )
+        if response.status_code >= 500:
+            raise TransientAPIError(
+                f"server error {response.status_code}: {response.text}"
             )
-            response.raise_for_status()
-            return response.json()
-        except httpx.ConnectError:
-            print(f"\n❌ ERROR: Cannot connect to API at {self.api_url}")
+        response.raise_for_status()
+        return response.json()
+
+    def create_transaction_via_api(self, transaction_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Post transaction to API endpoint, retrying transient failures."""
+        try:
+            return self._caller.call(self._post_transaction, transaction_data)
+        except CircuitBreakerOpenError:
+            print(f"\n❌ ERROR: API at {self.api_url} appears to be down")
+            print(f"Too many requests failed in a row; the circuit breaker opened.")
             print(f"Make sure the backend is running:")
             print(f"  cd backend")
             print(f"  uvicorn app.main:app --reload")
+            sys.exit(1)
+        except MaxRetriesExceededError as e:
+            cause = e.last_exception
+            if isinstance(cause, httpx.ConnectError):
+                print(f"\n❌ ERROR: Cannot connect to API at {self.api_url}")
+                print(f"Make sure the backend is running:")
+                print(f"  cd backend")
+                print(f"  uvicorn app.main:app --reload")
+            elif isinstance(cause, TransientAPIError):
+                print(f"\n❌ ERROR: API kept returning server errors")
+                print(f"Details: {cause}")
+            else:
+                print(f"\n❌ ERROR: Failed to create transaction after retries: {cause}")
             sys.exit(1)
         except httpx.HTTPStatusError as e:
             print(f"\n❌ ERROR: API returned error {e.response.status_code}")
