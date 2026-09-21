@@ -172,6 +172,23 @@ class TestGeographicAnomalyRule:
         )
         
         assert rule.evaluate(base_transaction, [prev_txn]) is False
+    
+    def test_calculate_distance_with_unit_parameter(self, base_transaction):
+        rule = GeographicAnomalyRule()
+        # New York to Los Angeles
+        lat1, lon1 = 40.7128, -74.0060  # NYC
+        lat2, lon2 = 34.0522, -118.2437  # LA
+        
+        # Default unit (km)
+        distance_km = rule._calculate_distance(lat1, lon1, lat2, lon2)
+        assert 3900 < distance_km < 4000  # ~3935 km
+        
+        # Miles unit
+        distance_miles = rule._calculate_distance(lat1, lon1, lat2, lon2, unit="miles")
+        assert 2400 < distance_miles < 2500  # ~2445 miles
+        
+        # Verify ratio is approximately correct (1 mile = 1.609 km)
+        assert abs(distance_km / distance_miles - 1.609) < 0.01
 
 
 class TestUnusualTimeRule:

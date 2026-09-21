@@ -76,9 +76,21 @@ class GeographicAnomalyRule(FraudRule):
                     return True
         return False
     
-    def _calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
-        """Calculate distance in km using Haversine formula"""
-        R = 6371  # Earth radius in km
+    def _calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float, *, unit: str = "km") -> float:
+        """Calculate distance using Haversine formula
+        
+        Args:
+            lat1: Latitude of first point
+            lon1: Longitude of first point
+            lat2: Latitude of second point
+            lon2: Longitude of second point
+            unit: Unit of distance ("km" or "miles"), defaults to "km"
+            
+        Returns:
+            Distance in the specified unit
+        """
+        # Earth radius in km or miles
+        R = 6371 if unit == "km" else 3959
         
         lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
         dlat = lat2 - lat1
