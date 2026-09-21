@@ -32,3 +32,21 @@ class TestSlugify:
     
     def test_uppercase_conversion(self):
         assert slugify("UPPERCASE") == "uppercase"
+    
+    def test_whitespace_only(self):
+        assert slugify("   ") == ""
+    
+    def test_single_character(self):
+        assert slugify("a") == "a"
+    
+    def test_none_input_raises_type_error(self):
+        with pytest.raises(TypeError, match="Expected str"):
+            slugify(None)
+    
+    def test_integer_input_raises_type_error(self):
+        with pytest.raises(TypeError, match="Expected str"):
+            slugify(123)
+    
+    def test_list_input_raises_type_error(self):
+        with pytest.raises(TypeError, match="Expected str"):
+            slugify(["test"])

@@ -11,10 +11,14 @@ def slugify(text: str) -> str:
     special characters while preserving alphanumeric characters and hyphens.
     
     Args:
-        text: The string to convert to a slug.
+        text: The string to convert to a slug. Must be a string.
     
     Returns:
-        A slugified version of the input string.
+        A slugified version of the input string, or empty string if input
+        becomes empty after processing.
+    
+    Raises:
+        TypeError: If text is not a string or is None.
     
     Example:
         >>> slugify("Whole Foods Market")
@@ -22,6 +26,10 @@ def slugify(text: str) -> str:
         >>> slugify("Apple Store!")
         'apple-store'
     """
+    # Validate input type
+    if not isinstance(text, str):
+        raise TypeError(f"Expected str, got {type(text).__name__}")
+    
     # Convert to lowercase
     text = text.lower()
     
