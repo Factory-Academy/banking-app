@@ -1,6 +1,7 @@
 import pytest
 from datetime import datetime
 from decimal import Decimal
+from unittest.mock import patch
 from app.models.transaction import Transaction, TransactionStatus, RiskLevel
 
 
@@ -241,3 +242,38 @@ def test_get_dashboard_stats(client, sample_transaction):
     assert "escalated_count" in data
     assert "avg_review_time_minutes" in data
     assert "transactions_by_risk" in data
+
+
+def test_create_transaction_with_partial_risk_assessment(client):
+    """Test that create_transaction handles missing keys in risk assessment gracefully"""
+    data = {
+        "account_number": "**** 3333",
+        "account_holder_name": "KeyError Test",
+        "amount": "500.00",
+        "merchant_name": "Safe Store",
+        "merchant_category": "Retail",
+        "transaction_type": "CARD",
+        "location_city": "Chicago",
+        "location_country": "US",
+        "latitude": 41.8781,
+        "longitude": -87.6298,
+        "timestamp": datetime.utcnow().isoformat()
+    }
+    
+    # Mock FraudDetectionService.analyze_transaction to return incomplete dict
+    with patch("app.routes.transactions.FraudDetectionService") as mock_service:
+        # Return a partial dict missing some keys
+        mock_service.return_value.analyze_transaction.return_value = {
+            "risk_score": 15,
+            # Missing risk_level, status, and fraud_flags
+        }
+        
+        response = client.post("/api/v1/transactions", json=data)
+        assert response.status_code == 201
+        txn = response.json()
+        
+        # Should use defaults for missing keys
+        assert txn["risk_score"] == 15
+        assert txn["risk_level"] == "LOW"  # default
+        assert txn["status"] == "CLEARED"  # default
+        assert txn["fraud_flags"] == []  # default
