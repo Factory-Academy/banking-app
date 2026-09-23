@@ -16,6 +16,7 @@ from app.schemas.transaction import (
     AccountStats
 )
 from app.services.fraud_detection import FraudDetectionService
+from app.utils.pagination import paginate_query
 
 router = APIRouter(prefix="/api/v1/transactions", tags=["transactions"])
 
@@ -94,11 +95,11 @@ def get_transactions(
     if max_amount:
         query = query.filter(Transaction.amount <= max_amount)
     
-    # Get total count
-    total = query.count()
+    # Apply ordering before pagination
+    query = query.order_by(desc(Transaction.timestamp))
     
-    # Apply pagination and ordering
-    transactions = query.order_by(desc(Transaction.timestamp)).offset(offset).limit(limit).all()
+    # Apply pagination using utility
+    transactions, total = paginate_query(query, offset=offset, limit=limit)
     
     return TransactionListResponse(
         transactions=transactions,
