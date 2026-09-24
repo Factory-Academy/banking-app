@@ -46,11 +46,11 @@ def create_transaction(
     fraud_service = FraudDetectionService()
     risk_assessment = fraud_service.analyze_transaction(new_txn, account_history)
     
-    # Apply risk assessment
-    new_txn.risk_score = risk_assessment["risk_score"]
-    new_txn.risk_level = risk_assessment["risk_level"]
-    new_txn.status = risk_assessment["status"]
-    new_txn.fraud_flags = risk_assessment["fraud_flags"]
+    # Apply risk assessment with safe dictionary access
+    new_txn.risk_score = risk_assessment.get("risk_score", 0)
+    new_txn.risk_level = risk_assessment.get("risk_level", RiskLevel.LOW)
+    new_txn.status = risk_assessment.get("status", TransactionStatus.CLEARED)
+    new_txn.fraud_flags = risk_assessment.get("fraud_flags", [])
     
     # Save to database
     db.add(new_txn)
