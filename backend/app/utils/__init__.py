@@ -5,10 +5,12 @@ from app.utils.pagination import (
     PaginatedResponse,
     paginate_query,
 )
+from app.utils.text import slugify
 
 __all__ = [
     "PaginationParams",
     "PaginatedResponse",
     "paginate_query",
+    "slugify",
 ]
 
