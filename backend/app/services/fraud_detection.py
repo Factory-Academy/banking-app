@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import List, Dict, Any
 from abc import ABC, abstractmethod
 from app.models.transaction import Transaction, TransactionStatus, RiskLevel
+from app.config.fraud_detection_config import FraudDetectionConfig, get_fraud_config
 from math import radians, sin, cos, sqrt, atan2
 
 
@@ -20,44 +21,47 @@ class FraudRule(ABC):
 
 
 class HighAmountRule(FraudRule):
-    """Flag transactions over $10,000"""
+    """Flag transactions over the configured threshold"""
     
-    def __init__(self):
-        super().__init__("high_amount", 30)
+    def __init__(self, config: FraudDetectionConfig = None):
+        self.config = config or get_fraud_config()
+        super().__init__("high_amount", self.config.high_amount_points)
     
     def evaluate(self, transaction: Transaction, account_history: List[Transaction]) -> bool:
-        return Decimal(str(transaction.amount)) > Decimal("10000")
+        return Decimal(str(transaction.amount)) > self.config.high_amount_threshold
 
 
 class VelocityRule(FraudRule):
-    """Flag more than 5 transactions within 1 hour"""
+    """Flag excessive transactions within configured time window"""
     
-    def __init__(self):
-        super().__init__("high_velocity", 40)
+    def __init__(self, config: FraudDetectionConfig = None):
+        self.config = config or get_fraud_config()
+        super().__init__("high_velocity", self.config.velocity_points)
     
     def evaluate(self, transaction: Transaction, account_history: List[Transaction]) -> bool:
-        one_hour_ago = transaction.timestamp - timedelta(hours=1)
+        time_window_ago = transaction.timestamp - timedelta(hours=self.config.velocity_time_window_hours)
         recent_transactions = [
             t for t in account_history
-            if t.timestamp > one_hour_ago and t.timestamp <= transaction.timestamp
+            if t.timestamp > time_window_ago and t.timestamp <= transaction.timestamp
         ]
-        return len(recent_transactions) > 5
+        return len(recent_transactions) > self.config.velocity_max_transactions
 
 
 class GeographicAnomalyRule(FraudRule):
-    """Flag transactions in different country within 4 hours"""
+    """Flag transactions in different country within configured time window"""
     
-    def __init__(self):
-        super().__init__("geographic_anomaly", 50)
+    def __init__(self, config: FraudDetectionConfig = None):
+        self.config = config or get_fraud_config()
+        super().__init__("geographic_anomaly", self.config.geographic_anomaly_points)
     
     def evaluate(self, transaction: Transaction, account_history: List[Transaction]) -> bool:
         if not account_history:
             return False
         
-        four_hours_ago = transaction.timestamp - timedelta(hours=4)
+        time_window_ago = transaction.timestamp - timedelta(hours=self.config.geographic_time_window_hours)
         recent_transactions = [
             t for t in account_history
-            if t.timestamp > four_hours_ago and t.timestamp < transaction.timestamp
+            if t.timestamp > time_window_ago and t.timestamp < transaction.timestamp
         ]
         
         for prev_txn in recent_transactions:
@@ -68,8 +72,8 @@ class GeographicAnomalyRule(FraudRule):
                         prev_txn.latitude, prev_txn.longitude,
                         transaction.latitude, transaction.longitude
                     )
-                    # If more than 500km apart, flag it
-                    if distance > 500:
+                    # If more than threshold distance apart, flag it
+                    if distance > self.config.geographic_distance_threshold_km:
                         return True
                 else:
                     # No coordinates, just check country difference
@@ -91,62 +95,66 @@ class GeographicAnomalyRule(FraudRule):
 
 
 class UnusualTimeRule(FraudRule):
-    """Flag transactions between 2 AM - 5 AM local time"""
+    """Flag transactions during configured unusual hours"""
     
-    def __init__(self):
-        super().__init__("unusual_time", 20)
+    def __init__(self, config: FraudDetectionConfig = None):
+        self.config = config or get_fraud_config()
+        super().__init__("unusual_time", self.config.unusual_time_points)
     
     def evaluate(self, transaction: Transaction, account_history: List[Transaction]) -> bool:
         hour = transaction.timestamp.hour
-        return 2 <= hour < 5
+        return self.config.unusual_time_start_hour <= hour < self.config.unusual_time_end_hour
 
 
 class FirstInternationalRule(FraudRule):
     """Flag first international transaction for account"""
     
-    def __init__(self):
-        super().__init__("first_international", 25)
+    def __init__(self, config: FraudDetectionConfig = None):
+        self.config = config or get_fraud_config()
+        super().__init__("first_international", self.config.first_international_points)
     
     def evaluate(self, transaction: Transaction, account_history: List[Transaction]) -> bool:
-        if transaction.location_country == "US":
+        if transaction.location_country == self.config.home_country_code:
             return False
         
         # Check if this is first international transaction
         international_history = [
             t for t in account_history
-            if t.location_country != "US"
+            if t.location_country != self.config.home_country_code
         ]
         
         return len(international_history) == 0
 
 
 class AmountDeviationRule(FraudRule):
-    """Flag transactions >3x the account's average"""
+    """Flag transactions exceeding configured multiplier of account average"""
     
-    def __init__(self):
-        super().__init__("amount_deviation", 35)
+    def __init__(self, config: FraudDetectionConfig = None):
+        self.config = config or get_fraud_config()
+        super().__init__("amount_deviation", self.config.amount_deviation_points)
     
     def evaluate(self, transaction: Transaction, account_history: List[Transaction]) -> bool:
-        if not account_history or len(account_history) < 3:
+        if not account_history or len(account_history) < self.config.amount_deviation_min_transactions:
             return False
         
         avg_amount = sum(Decimal(str(t.amount)) for t in account_history) / len(account_history)
         current_amount = Decimal(str(transaction.amount))
         
-        return current_amount > (avg_amount * 3)
+        return current_amount > (avg_amount * self.config.amount_deviation_multiplier)
 
 
 class FraudDetectionService:
     """Service for detecting fraudulent transactions"""
     
-    def __init__(self):
+    def __init__(self, config: FraudDetectionConfig = None):
+        self.config = config or get_fraud_config()
         self.rules: List[FraudRule] = [
-            HighAmountRule(),
-            VelocityRule(),
-            GeographicAnomalyRule(),
-            UnusualTimeRule(),
-            FirstInternationalRule(),
-            AmountDeviationRule()
+            HighAmountRule(self.config),
+            VelocityRule(self.config),
+            GeographicAnomalyRule(self.config),
+            UnusualTimeRule(self.config),
+            FirstInternationalRule(self.config),
+            AmountDeviationRule(self.config)
         ]
     
     def analyze_transaction(
@@ -168,11 +176,11 @@ class FraudDetectionService:
                 total_score += rule.risk_points
                 flags.append(rule.name)
         
-        # Determine risk level and status
-        if total_score >= 70:
+        # Determine risk level and status using config thresholds
+        if total_score >= self.config.high_risk_threshold:
             risk_level = RiskLevel.HIGH
             status = TransactionStatus.HELD
-        elif total_score >= 40:
+        elif total_score >= self.config.medium_risk_threshold:
             risk_level = RiskLevel.MEDIUM
             status = TransactionStatus.CLEARED
         else:
