@@ -22,6 +22,10 @@ def test_ttl_cache_basic():
     # Different arg should not be cached
     assert get_data(2) == 4
     assert call_count == 2
+    
+    info = get_data.cache_info()
+    assert info.hits == 1
+    assert info.misses == 2
 
 @pytest.mark.unit
 def test_ttl_cache_expiration():
@@ -91,3 +95,76 @@ def test_ttl_cache_clear():
     
     get_data(1)
     assert call_count == 2
+    
+    info = get_data.cache_info()
+    assert info.hits == 0
+    assert info.misses == 1
+
+@pytest.mark.unit
+def test_ttl_cache_unhashable():
+    call_count = 0
+    
+    @ttl_cache(ttl=60, maxsize=128)
+    def get_data(l):
+        nonlocal call_count
+        call_count += 1
+        return sum(l)
+    
+    # List is unhashable, but make_hashable converts it
+    assert get_data([1, 2]) == 3
+    assert call_count == 1
+    
+    assert get_data([1, 2]) == 3
+    assert call_count == 1 # Should be cached now!
+    
+    info = get_data.cache_info()
+    assert info.hits == 1
+
+@pytest.mark.unit
+def test_ttl_cache_zero_maxsize():
+    call_count = 0
+    
+    @ttl_cache(ttl=60, maxsize=0)
+    def get_data(x):
+        nonlocal call_count
+        call_count += 1
+        return x
+    
+    assert get_data(1) == 1
+    assert get_data(1) == 1
+    assert call_count == 2
+    assert get_data.cache_info().currsize == 0
+
+@pytest.mark.unit
+def test_ttl_cache_zero_ttl():
+    call_count = 0
+    
+    @ttl_cache(ttl=0, maxsize=128)
+    def get_data(x):
+        nonlocal call_count
+        call_count += 1
+        return x
+    
+    assert get_data(1) == 1
+    assert get_data(1) == 1
+    assert call_count == 2
+    assert get_data.cache_info().currsize == 0
+
+@pytest.mark.unit
+def test_ttl_cache_exception():
+    call_count = 0
+    
+    @ttl_cache(ttl=60, maxsize=128)
+    def get_data(x):
+        nonlocal call_count
+        call_count += 1
+        raise ValueError("error")
+    
+    with pytest.raises(ValueError, match="error"):
+        get_data(1)
+    
+    assert call_count == 1
+    info = get_data.cache_info()
+    assert info.misses == 1
+    assert info.hits == 0
+    assert info.currsize == 0

@@ -188,3 +188,13 @@ class FraudDetectionService:
             "status": status,
             "fraud_flags": flags
         }
+
+    def clear_caches(self):
+        """Clear all internal caches"""
+        GeographicAnomalyRule._calculate_distance.cache_clear()
+    
+    def get_cache_info(self) -> Dict[str, Any]:
+        """Get cache performance metrics"""
+        return {
+            "distance_calculation": GeographicAnomalyRule._calculate_distance.cache_info()._asdict()
+        }
