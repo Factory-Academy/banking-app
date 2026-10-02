@@ -3,6 +3,7 @@ from decimal import Decimal
 from typing import List, Dict, Any
 from abc import ABC, abstractmethod
 from app.models.transaction import Transaction, TransactionStatus, RiskLevel
+from app.utils.cache import ttl_cache
 from math import radians, sin, cos, sqrt, atan2
 
 
@@ -76,7 +77,9 @@ class GeographicAnomalyRule(FraudRule):
                     return True
         return False
     
-    def _calculate_distance(self, lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    @staticmethod
+    @ttl_cache(ttl=3600, maxsize=1000)
+    def _calculate_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
         """Calculate distance in km using Haversine formula"""
         R = 6371  # Earth radius in km
         
@@ -184,4 +187,14 @@ class FraudDetectionService:
             "risk_level": risk_level,
             "status": status,
             "fraud_flags": flags
+        }
+
+    def clear_caches(self):
+        """Clear all internal caches"""
+        GeographicAnomalyRule._calculate_distance.cache_clear()
+    
+    def get_cache_info(self) -> Dict[str, Any]:
+        """Get cache performance metrics"""
+        return {
+            "distance_calculation": GeographicAnomalyRule._calculate_distance.cache_info()._asdict()
         }

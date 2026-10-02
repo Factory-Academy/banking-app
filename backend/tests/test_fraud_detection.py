@@ -359,3 +359,14 @@ class TestFraudDetectionService:
         assert result["risk_level"] == RiskLevel.MEDIUM
         assert result["status"] == TransactionStatus.CLEARED
         assert 40 <= result["risk_score"] < 70
+
+    def test_cache_functionality(self, fraud_service):
+        """Test that the internal cache is accessible and functional"""
+        info = fraud_service.get_cache_info()
+        assert "distance_calculation" in info
+        assert info["distance_calculation"]["maxsize"] == 1000
+        
+        # Clear cache and check if it's empty
+        fraud_service.clear_caches()
+        info = fraud_service.get_cache_info()
+        assert info["distance_calculation"]["currsize"] == 0
