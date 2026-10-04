@@ -40,25 +40,32 @@ def test_make_hashable_set_sort_keys_true():
 
 @pytest.mark.unit
 def test_make_hashable_set_sort_keys_false():
-    """Test that set elements are not sorted when sort_keys=False."""
+    """Test that set elements are always sorted (even when sort_keys=False) for determinism."""
     obj = {3, 1, 2}
     result = make_hashable(obj, sort_keys=False)
-    # Order is not deterministic, but all elements should be present
-    assert sorted(result) == [1, 2, 3]
-    assert len(result) == 3
+    # Sets are always sorted since they have no inherent order
+    assert result == (1, 2, 3)
 
 @pytest.mark.unit
 def test_make_hashable_nested_sort_keys():
-    """Test that sort_keys is propagated through nested structures."""
-    obj = {"outer": {"z": 1, "a": 2}}
+    """Test that sort_keys applies to dicts but not sets (always sorted)."""
+    obj_dict = {"outer": {"z": 1, "a": 2}}
     
     # With sort_keys=True
-    result_sorted = make_hashable(obj, sort_keys=True)
+    result_sorted = make_hashable(obj_dict, sort_keys=True)
     assert result_sorted == (("outer", (("a", 2), ("z", 1))),)
     
     # With sort_keys=False
-    result_unsorted = make_hashable(obj, sort_keys=False)
+    result_unsorted = make_hashable(obj_dict, sort_keys=False)
     assert result_unsorted == (("outer", (("z", 1), ("a", 2))),)
+    
+    # Sets always sorted regardless of sort_keys
+    obj_with_set = {"key": {3, 1, 2}}
+    result_set_true = make_hashable(obj_with_set, sort_keys=True)
+    result_set_false = make_hashable(obj_with_set, sort_keys=False)
+    # The set portion is always sorted
+    assert result_set_true[0][1] == (1, 2, 3)
+    assert result_set_false[0][1] == (1, 2, 3)
 
 @pytest.mark.unit
 def test_make_hashable_already_hashable():
