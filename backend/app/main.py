@@ -1,6 +1,8 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from app.database import engine, Base
+from app.exceptions import TransactionNotFoundError
 from app.routes import transactions_router, stats_router
 from app.config import settings
 
@@ -21,6 +23,13 @@ app.add_middleware(
 # Include routers
 app.include_router(transactions_router)
 app.include_router(stats_router)
+
+
+@app.exception_handler(TransactionNotFoundError)
+def transaction_not_found_exception_handler(
+    request: Request, exc: TransactionNotFoundError
+):
+    return JSONResponse(status_code=404, content={"detail": str(exc)})
 
 
 @app.get("/")

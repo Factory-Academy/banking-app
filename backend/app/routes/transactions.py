@@ -16,6 +16,7 @@ from app.schemas.transaction import (
     AccountStats
 )
 from app.services.fraud_detection import FraudDetectionService
+from app.services.transaction_lookup import get_transaction_or_raise
 
 router = APIRouter(prefix="/api/v1/transactions", tags=["transactions"])
 
@@ -111,21 +112,14 @@ def get_transactions(
 @router.get("/{transaction_id}", response_model=TransactionResponse)
 def get_transaction(transaction_id: str, db: Session = Depends(get_db)):
     """Get single transaction by ID"""
-    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
-    
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
-    
+    transaction = get_transaction_or_raise(db=db, transaction_id=transaction_id)
     return transaction
 
 
 @router.get("/{transaction_id}/history", response_model=AccountHistoryResponse)
 def get_account_history(transaction_id: str, db: Session = Depends(get_db)):
     """Get transaction history for the account with contextual time window"""
-    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
-    
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+    transaction = get_transaction_or_raise(db=db, transaction_id=transaction_id)
     
     # Get contextual transactions (±7 days around the reviewed transaction)
     time_window_start = transaction.timestamp - timedelta(days=7)
@@ -207,10 +201,7 @@ def review_transaction(
     db: Session = Depends(get_db)
 ):
     """Analyst reviews a held transaction"""
-    transaction = db.query(Transaction).filter(Transaction.id == transaction_id).first()
-    
-    if not transaction:
-        raise HTTPException(status_code=404, detail="Transaction not found")
+    transaction = get_transaction_or_raise(db=db, transaction_id=transaction_id)
     
     # Validate decision
     if review.decision not in [TransactionStatus.APPROVED, TransactionStatus.REJECTED, TransactionStatus.ESCALATED]:

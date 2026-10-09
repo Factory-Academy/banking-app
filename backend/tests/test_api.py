@@ -73,6 +73,12 @@ def test_get_single_transaction(client, sample_transaction):
     assert data["account_number"] == sample_transaction.account_number
 
 
+def test_get_single_transaction_case_insensitive_id(client, sample_transaction):
+    response = client.get(f"/api/v1/transactions/{sample_transaction.id.lower()}")
+    assert response.status_code == 200
+    assert response.json()["id"] == sample_transaction.id
+
+
 def test_get_nonexistent_transaction(client):
     response = client.get("/api/v1/transactions/NONEXISTENT")
     assert response.status_code == 404
