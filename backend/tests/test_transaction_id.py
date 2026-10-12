@@ -11,3 +11,9 @@ def test_normalize_transaction_id_returns_none_for_blank():
 
 def test_normalize_transaction_id_returns_none_for_none():
     assert normalize_transaction_id(None) is None
+
+
+def test_normalize_transaction_id_strips_prefix_when_requested():
+    assert normalize_transaction_id("TXN-123", include_prefix=False) == "123"
+    assert normalize_transaction_id("txn-123", include_prefix=False) == "123"
+    assert normalize_transaction_id("NO-PREFIX-123", include_prefix=False) == "NO-PREFIX-123"
