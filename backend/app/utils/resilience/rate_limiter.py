@@ -3,6 +3,7 @@ import time
 from dataclasses import dataclass
 from typing import Callable, Dict, Optional
 
+from app.utils.resilience._validation import require_non_negative, require_positive
 from app.utils.resilience.token_bucket import TokenBucket
 
 
@@ -37,13 +38,8 @@ class RateLimiter:
         refill_rate: float,
         time_func: Callable[[], float] = time.monotonic,
     ) -> None:
-        if capacity <= 0:
-            raise ValueError("capacity must be positive")
-        if refill_rate <= 0:
-            raise ValueError("refill_rate must be positive")
-
-        self.capacity = float(capacity)
-        self.refill_rate = float(refill_rate)
+        self.capacity = require_positive(capacity, "capacity")
+        self.refill_rate = require_positive(refill_rate, "refill_rate")
         self._time_func = time_func
         self._buckets: Dict[str, TokenBucket] = {}
         self._lock = threading.Lock()
@@ -67,6 +63,7 @@ class RateLimiter:
         """
         if key is None or key == "":
             raise ValueError("key must be a non-empty string")
+        cost = require_positive(cost, "cost")
 
         with self._lock:
             bucket = self._get_bucket(key)
@@ -86,6 +83,7 @@ class RateLimiter:
         """Report the limit state for ``key`` without consuming tokens."""
         if key is None or key == "":
             raise ValueError("key must be a non-empty string")
+        cost = require_positive(cost, "cost")
 
         with self._lock:
             bucket = self._get_bucket(key)
@@ -116,8 +114,7 @@ class RateLimiter:
         Returns the number of buckets removed. A bucket that has refilled to
         capacity is equivalent to a fresh one, so dropping it is safe.
         """
-        if max_idle_seconds < 0:
-            raise ValueError("max_idle_seconds must be non-negative")
+        max_idle_seconds = require_non_negative(max_idle_seconds, "max_idle_seconds")
 
         now = self._time_func()
         with self._lock:

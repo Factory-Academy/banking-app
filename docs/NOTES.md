@@ -70,7 +70,15 @@ arguments so tests can drive both deterministically.
 - A non-monotonic clock stepping backwards never refills or drains a bucket.
 - Fractional tokens accumulate across calls, so sub-second refill is exact.
 - Invalid construction (`capacity <= 0`, `refill_rate <= 0`), non-positive
-  costs, and empty keys raise `ValueError`.
+  costs, a negative `max_idle_seconds`, and empty keys raise `ValueError`.
+- Non-finite numbers (`nan`, `+inf`, `-inf`) are rejected everywhere a count,
+  rate, cost, or idle window is accepted. These values would otherwise slip
+  past the ordinary `<= 0` / `<= capacity` guards — `nan` compares falsey to
+  every bound and `+inf` reads as "always over capacity" — and silently
+  corrupt a bucket's token arithmetic. The shared checks live in
+  `app/utils/resilience/_validation.py` (`require_positive`,
+  `require_non_negative`) so every entry point validates identically, and a
+  rejected call leaves bucket state untouched.
 - Each key is isolated; one noisy account cannot throttle others.
 - `prune` evicts idle buckets to bound memory in long-lived processes.
 

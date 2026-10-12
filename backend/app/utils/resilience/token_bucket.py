@@ -2,6 +2,8 @@ import threading
 import time
 from typing import Callable
 
+from app.utils.resilience._validation import require_positive
+
 
 class TokenBucket:
     """A thread-safe token bucket.
@@ -22,15 +24,10 @@ class TokenBucket:
         refill_rate: float,
         time_func: Callable[[], float] = time.monotonic,
     ) -> None:
-        if capacity <= 0:
-            raise ValueError("capacity must be positive")
-        if refill_rate <= 0:
-            raise ValueError("refill_rate must be positive")
-
-        self.capacity = float(capacity)
-        self.refill_rate = float(refill_rate)
+        self.capacity = require_positive(capacity, "capacity")
+        self.refill_rate = require_positive(refill_rate, "refill_rate")
         self._time_func = time_func
-        self._tokens = float(capacity)
+        self._tokens = self.capacity
         self._last_refill = time_func()
         self._lock = threading.Lock()
 
@@ -49,8 +46,7 @@ class TokenBucket:
         A request for more tokens than ``capacity`` can never be satisfied and
         returns ``False`` without blocking.
         """
-        if tokens <= 0:
-            raise ValueError("tokens must be positive")
+        tokens = require_positive(tokens, "tokens")
         if tokens > self.capacity:
             return False
 
@@ -75,8 +71,7 @@ class TokenBucket:
         ``float('inf')`` when the request exceeds capacity and can never be
         satisfied.
         """
-        if tokens <= 0:
-            raise ValueError("tokens must be positive")
+        tokens = require_positive(tokens, "tokens")
         if tokens > self.capacity:
             return float("inf")
 

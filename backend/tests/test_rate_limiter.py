@@ -126,6 +126,37 @@ def test_prune_rejects_negative():
         limiter.prune(-1)
 
 
+@pytest.mark.parametrize("bad_idle", [float("nan"), float("inf"), float("-inf")])
+def test_prune_rejects_non_finite(bad_idle):
+    limiter = RateLimiter(capacity=1, refill_rate=1)
+    with pytest.raises(ValueError):
+        limiter.prune(bad_idle)
+
+
+@pytest.mark.parametrize("bad_cost", [0, -1, float("nan"), float("inf"), float("-inf")])
+def test_allow_rejects_invalid_cost(bad_cost):
+    limiter = RateLimiter(capacity=5, refill_rate=1)
+    with pytest.raises(ValueError):
+        limiter.allow("acct-1", cost=bad_cost)
+
+
+@pytest.mark.parametrize("bad_cost", [0, -1, float("nan"), float("inf"), float("-inf")])
+def test_peek_rejects_invalid_cost(bad_cost):
+    limiter = RateLimiter(capacity=5, refill_rate=1)
+    with pytest.raises(ValueError):
+        limiter.peek("acct-1", cost=bad_cost)
+
+
+def test_rejected_cost_leaves_bucket_untouched():
+    clock = FakeClock()
+    limiter = RateLimiter(capacity=3, refill_rate=1, time_func=clock)
+    with pytest.raises(ValueError):
+        limiter.allow("acct-1", cost=float("inf"))
+    # The invalid call must not have created or drained a bucket.
+    assert limiter.active_keys == 0
+    assert limiter.allow("acct-1").remaining == 2
+
+
 @pytest.mark.parametrize("bad_key", [None, ""])
 def test_empty_key_rejected(bad_key):
     limiter = RateLimiter(capacity=1, refill_rate=1)
@@ -141,6 +172,18 @@ def test_invalid_capacity_rejected(bad_capacity):
 
 @pytest.mark.parametrize("bad_rate", [0, -1])
 def test_invalid_refill_rate_rejected(bad_rate):
+    with pytest.raises(ValueError):
+        RateLimiter(capacity=1, refill_rate=bad_rate)
+
+
+@pytest.mark.parametrize("bad_capacity", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_capacity_rejected(bad_capacity):
+    with pytest.raises(ValueError):
+        RateLimiter(capacity=bad_capacity, refill_rate=1)
+
+
+@pytest.mark.parametrize("bad_rate", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_refill_rate_rejected(bad_rate):
     with pytest.raises(ValueError):
         RateLimiter(capacity=1, refill_rate=bad_rate)
 

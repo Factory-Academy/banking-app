@@ -125,3 +125,39 @@ def test_non_positive_time_until_available_rejected():
     bucket = TokenBucket(capacity=5, refill_rate=1)
     with pytest.raises(ValueError):
         bucket.time_until_available(0)
+
+
+@pytest.mark.parametrize("bad_capacity", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_capacity_rejected(bad_capacity):
+    with pytest.raises(ValueError):
+        TokenBucket(capacity=bad_capacity, refill_rate=1)
+
+
+@pytest.mark.parametrize("bad_rate", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_refill_rate_rejected(bad_rate):
+    with pytest.raises(ValueError):
+        TokenBucket(capacity=5, refill_rate=bad_rate)
+
+
+@pytest.mark.parametrize("bad_tokens", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_acquire_rejected(bad_tokens):
+    # Without an explicit guard, NaN slips past ``tokens <= 0`` and +inf past
+    # ``tokens > capacity``, so both must raise rather than silently misbehave.
+    bucket = TokenBucket(capacity=5, refill_rate=1)
+    with pytest.raises(ValueError):
+        bucket.try_acquire(bad_tokens)
+
+
+def test_non_finite_acquire_does_not_consume():
+    clock = FakeClock()
+    bucket = TokenBucket(capacity=5, refill_rate=1, time_func=clock)
+    with pytest.raises(ValueError):
+        bucket.try_acquire(float("nan"))
+    assert bucket.tokens == 5
+
+
+@pytest.mark.parametrize("bad_tokens", [float("nan"), float("inf"), float("-inf")])
+def test_non_finite_time_until_available_rejected(bad_tokens):
+    bucket = TokenBucket(capacity=5, refill_rate=1)
+    with pytest.raises(ValueError):
+        bucket.time_until_available(bad_tokens)
