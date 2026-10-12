@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from app.database import engine, Base
-from app.exceptions import TransactionNotFoundError
+from app.exceptions import TransactionNotFoundError, RateLimitExceededError
 from app.routes import transactions_router, stats_router
 from app.config import settings
 
@@ -30,6 +30,18 @@ def transaction_not_found_exception_handler(
     request: Request, exc: TransactionNotFoundError
 ):
     return JSONResponse(status_code=404, content={"detail": str(exc)})
+
+
+@app.exception_handler(RateLimitExceededError)
+def rate_limit_exceeded_exception_handler(
+    request: Request, exc: RateLimitExceededError
+):
+    retry_after = max(1, int(exc.retry_after + 0.999))
+    return JSONResponse(
+        status_code=429,
+        content={"detail": str(exc), "retry_after": retry_after},
+        headers={"Retry-After": str(retry_after)},
+    )
 
 
 @app.get("/")

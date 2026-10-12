@@ -1,7 +1,6 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
 from typing import Optional
-import uuid
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 from sqlalchemy import desc, and_
@@ -15,8 +14,8 @@ from app.schemas.transaction import (
     AccountHistoryResponse,
     AccountStats
 )
-from app.services.fraud_detection import FraudDetectionService
 from app.services.transaction_lookup import get_transaction_or_raise
+from app.services.transaction_submission import submit_transaction
 
 router = APIRouter(prefix="/api/v1/transactions", tags=["transactions"])
 
@@ -27,37 +26,7 @@ def create_transaction(
     db: Session = Depends(get_db)
 ):
     """Create a new transaction and run fraud detection"""
-    # Generate transaction ID
-    txn_id = f"TXN-{uuid.uuid4().hex[:8].upper()}"
-    
-    # Get account history for fraud detection context
-    account_history = db.query(Transaction)\
-        .filter(Transaction.account_number == transaction.account_number)\
-        .order_by(desc(Transaction.timestamp))\
-        .all()
-    
-    # Create transaction object
-    new_txn = Transaction(
-        id=txn_id,
-        **transaction.model_dump()
-    )
-    
-    # Run fraud detection
-    fraud_service = FraudDetectionService()
-    risk_assessment = fraud_service.analyze_transaction(new_txn, account_history)
-    
-    # Apply risk assessment
-    new_txn.risk_score = risk_assessment["risk_score"]
-    new_txn.risk_level = risk_assessment["risk_level"]
-    new_txn.status = risk_assessment["status"]
-    new_txn.fraud_flags = risk_assessment["fraud_flags"]
-    
-    # Save to database
-    db.add(new_txn)
-    db.commit()
-    db.refresh(new_txn)
-    
-    return new_txn
+    return submit_transaction(db=db, transaction=transaction)
 
 
 @router.get("", response_model=TransactionListResponse)
