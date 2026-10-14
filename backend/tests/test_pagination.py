@@ -273,6 +273,21 @@ class TestCreatePaginatedResponse:
         assert response["has_more"] is False
         assert response["page_number"] == 2
         assert response["total_pages"] == 2
+    
+    def test_create_paginated_response_negative_total(self):
+        """Test create_paginated_response rejects negative total"""
+        with pytest.raises(ValueError, match="total must be >= 0"):
+            create_paginated_response([], total=-1, offset=0, limit=10)
+    
+    def test_create_paginated_response_negative_offset(self):
+        """Test create_paginated_response rejects negative offset"""
+        with pytest.raises(ValueError, match="offset must be >= 0"):
+            create_paginated_response([], total=0, offset=-1, limit=10)
+    
+    def test_create_paginated_response_invalid_limit(self):
+        """Test create_paginated_response rejects limit < 1"""
+        with pytest.raises(ValueError, match="limit must be >= 1"):
+            create_paginated_response([], total=0, offset=0, limit=0)
 
 
 class TestPaginationParams:
@@ -298,6 +313,21 @@ class TestPaginationParams:
         
         with pytest.raises(Exception):  # Pydantic raises ValidationError for frozen models
             params.offset = 10
+    
+    def test_pagination_params_negative_offset(self):
+        """Test PaginationParams rejects negative offset"""
+        with pytest.raises(ValueError, match="offset must be >= 0"):
+            PaginationParams(offset=-1, limit=50)
+    
+    def test_pagination_params_invalid_limit_too_low(self):
+        """Test PaginationParams rejects limit < 1"""
+        with pytest.raises(ValueError, match="limit must be between 1 and 500"):
+            PaginationParams(offset=0, limit=0)
+    
+    def test_pagination_params_invalid_limit_too_high(self):
+        """Test PaginationParams rejects limit > 500"""
+        with pytest.raises(ValueError, match="limit must be between 1 and 500"):
+            PaginationParams(offset=0, limit=501)
 
 
 class TestPaginatedResult:
@@ -340,6 +370,21 @@ class TestPaginatedResult:
         assert result.has_more is False
         assert result.page_number == 1
         assert result.total_pages == 1
+    
+    def test_paginated_result_negative_total(self):
+        """Test PaginatedResult rejects negative total"""
+        with pytest.raises(ValueError, match="value must be >= 0"):
+            PaginatedResult(items=[], total=-1, offset=0, limit=10)
+    
+    def test_paginated_result_negative_offset(self):
+        """Test PaginatedResult rejects negative offset"""
+        with pytest.raises(ValueError, match="value must be >= 0"):
+            PaginatedResult(items=[], total=0, offset=-1, limit=10)
+    
+    def test_paginated_result_invalid_limit(self):
+        """Test PaginatedResult rejects limit < 1"""
+        with pytest.raises(ValueError, match="limit must be >= 1"):
+            PaginatedResult(items=[], total=0, offset=0, limit=0)
 
 
 class TestPaginationIntegration:

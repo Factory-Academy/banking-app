@@ -1,6 +1,6 @@
 """Pagination utilities for database queries"""
-from typing import TypeVar, Generic, List
-from pydantic import BaseModel
+from typing import TypeVar, Generic, List, Tuple
+from pydantic import BaseModel, field_validator
 from sqlalchemy.orm import Query
 
 T = TypeVar('T')
@@ -14,11 +14,19 @@ class PaginationParams(BaseModel):
     class Config:
         frozen = True
     
-    def __post_init__(self):
-        if self.offset < 0:
+    @field_validator('offset')
+    @classmethod
+    def validate_offset(cls, v: int) -> int:
+        if v < 0:
             raise ValueError("offset must be >= 0")
-        if self.limit < 1 or self.limit > 500:
+        return v
+    
+    @field_validator('limit')
+    @classmethod
+    def validate_limit(cls, v: int) -> int:
+        if v < 1 or v > 500:
             raise ValueError("limit must be between 1 and 500")
+        return v
 
 
 class PaginatedResult(BaseModel, Generic[T]):
@@ -28,6 +36,20 @@ class PaginatedResult(BaseModel, Generic[T]):
     offset: int
     limit: int
     
+    @field_validator('total', 'offset')
+    @classmethod
+    def validate_non_negative(cls, v: int) -> int:
+        if v < 0:
+            raise ValueError("value must be >= 0")
+        return v
+    
+    @field_validator('limit')
+    @classmethod
+    def validate_limit_positive(cls, v: int) -> int:
+        if v < 1:
+            raise ValueError("limit must be >= 1")
+        return v
+    
     @property
     def has_more(self) -> bool:
         """Check if there are more items beyond current page"""
@@ -36,19 +58,19 @@ class PaginatedResult(BaseModel, Generic[T]):
     @property
     def page_number(self) -> int:
         """Calculate current page number (1-indexed)"""
-        if self.limit == 0:
+        if self.limit <= 0:
             return 1
         return (self.offset // self.limit) + 1
     
     @property
     def total_pages(self) -> int:
         """Calculate total number of pages"""
-        if self.limit == 0 or self.total == 0:
+        if self.limit <= 0 or self.total == 0:
             return 1
         return (self.total + self.limit - 1) // self.limit
 
 
-def paginate_query(query: Query, offset: int = 0, limit: int = 50) -> tuple[list, int]:
+def paginate_query(query: Query, offset: int = 0, limit: int = 50) -> Tuple[list, int]:
     """
     Apply pagination to a SQLAlchemy query.
     
@@ -94,7 +116,17 @@ def create_paginated_response(
     
     Returns:
         dict with items, total, offset, limit, has_more, and page info
+    
+    Raises:
+        ValueError: If total or offset are negative, or limit is < 1
     """
+    if total < 0:
+        raise ValueError("total must be >= 0")
+    if offset < 0:
+        raise ValueError("offset must be >= 0")
+    if limit < 1:
+        raise ValueError("limit must be >= 1")
+    
     has_more = offset + limit < total
     page_number = (offset // limit) + 1 if limit > 0 else 1
     total_pages = (total + limit - 1) // limit if limit > 0 and total > 0 else 1
