@@ -77,3 +77,36 @@ The refactor is behavior-preserving. Subtle details were kept deliberately:
   filtering against a real session, the service end to end, and the two HTTP
   routes to confirm externally observable behavior (including rounding) is
   unchanged.
+
+## Follow-up: edge-case hardening
+
+The first cut preserved behavior exactly, including a few rough edges that the
+nullable columns (`location_city`, `location_country`, `created_at`,
+`reviewed_at`) make reachable with real data. This follow-up tightens them. The
+hot paths (fully populated rows) are unchanged; only degenerate inputs behave
+differently now.
+
+- **Missing locations.** `location_label` no longer emits a literal
+  `"None, None"`. It drops blank/`None` components, so a half-recorded location
+  renders as the one part it has and a fully missing one collapses to the
+  exported `UNKNOWN_LOCATION` constant. `top_locations` skips rows with no
+  usable location entirely (via `has_location`), so an un-geocoded transaction
+  can no longer rank as a phantom location. The row still counts toward
+  `transaction_count` and the amount average.
+- **Boundary normalization.** The repository adapter coalesces blank or
+  whitespace-only location strings to `None` and defaults a missing `amount` to
+  `Decimal("0")`, so the pure core receives clean data and `Decimal(str(None))`
+  can never abort analytics for an account over one bad row.
+- **Negative review durations.** `review_duration_minutes` returns `None` when
+  `reviewed_at` precedes `created_at` (clock skew / out-of-order data). Such a
+  row is treated exactly like an un-timestamped one: it contributes nothing to
+  the numerator but still counts in the denominator, so the average can no
+  longer be dragged below zero.
+- **Missing timestamps in windows.** `within_window` skips rows whose timestamp
+  is `None` instead of raising on the comparison.
+- **Degenerate arguments.** `top_locations` returns `[]` for a non-positive
+  `top_n`, and `average_amount` ignores `None` entries.
+
+`tests/test_analytics.py` gains unit cases for each of the above plus
+integration coverage that a stored blank-string location is normalized away end
+to end.

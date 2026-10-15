@@ -1,3 +1,4 @@
+from app.services.analytics.core import UNKNOWN_LOCATION
 from app.services.analytics.models import (
     AccountStatistics,
     DashboardCriteria,
@@ -20,4 +21,5 @@ __all__ = [
     "TransactionAnalyticsRepository",
     "to_record",
     "AnalyticsService",
+    "UNKNOWN_LOCATION",
 ]

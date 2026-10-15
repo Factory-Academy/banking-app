@@ -20,19 +20,37 @@ from app.services.analytics.models import (
 
 CONTEXTUAL_WINDOW_DAYS = 7
 DEFAULT_TOP_LOCATIONS = 3
+UNKNOWN_LOCATION = "Unknown"
 
 
 def average_amount(amounts: Iterable[Decimal]) -> Decimal:
-    """Mean of ``amounts``; ``Decimal("0")`` when there are none."""
-    values = list(amounts)
+    """Mean of ``amounts``; ``Decimal("0")`` when there are none.
+
+    ``None`` entries are ignored so a single row with a missing amount cannot
+    abort the whole aggregation.
+    """
+    values = [value for value in amounts if value is not None]
     if not values:
         return Decimal("0")
     return sum(values, Decimal("0")) / len(values)
 
 
+def has_location(record: TxnRecord) -> bool:
+    """True when the record carries any usable (non-blank) city or country."""
+    city = (record.location_city or "").strip()
+    country = (record.location_country or "").strip()
+    return bool(city or country)
+
+
 def location_label(city: Optional[str], country: Optional[str]) -> str:
-    """Render the ``"City, Country"`` label used for grouping locations."""
-    return f"{city}, {country}"
+    """Render the ``"City, Country"`` label used for grouping locations.
+
+    Missing or blank components are dropped, so a partially recorded location
+    renders as the single part it has and a fully missing one collapses to
+    :data:`UNKNOWN_LOCATION` instead of a literal ``"None, None"``.
+    """
+    parts = [part.strip() for part in (city, country) if part and part.strip()]
+    return ", ".join(parts) if parts else UNKNOWN_LOCATION
 
 
 def top_locations(
@@ -40,11 +58,17 @@ def top_locations(
 ) -> List[str]:
     """Most frequent location labels, most common first.
 
-    Ties are broken by first-seen order (dicts preserve insertion order), which
-    matches the behavior of the original implementation.
+    Records with no usable location are skipped so an un-geocoded transaction
+    never ranks as a phantom location. Ties are broken by first-seen order
+    (dicts preserve insertion order), which matches the behavior of the
+    original implementation. A non-positive ``top_n`` yields an empty list.
     """
+    if top_n <= 0:
+        return []
     counts: Dict[str, int] = {}
     for record in records:
+        if not has_location(record):
+            continue
         label = location_label(record.location_city, record.location_country)
         counts[label] = counts.get(label, 0) + 1
     return sorted(counts.keys(), key=lambda label: counts[label], reverse=True)[:top_n]
@@ -87,17 +111,34 @@ def contextual_window(
 def within_window(
     records: Iterable[TxnRecord], window: TimeWindow
 ) -> List[TxnRecord]:
-    """Records whose timestamp falls inside ``window`` (inclusive)."""
-    return [r for r in records if window.start <= r.timestamp <= window.end]
+    """Records whose timestamp falls inside ``window`` (inclusive).
+
+    Records without a timestamp are skipped rather than raising on the
+    comparison, so a partially populated row cannot break contextual history.
+    """
+    return [
+        r
+        for r in records
+        if r.timestamp is not None and window.start <= r.timestamp <= window.end
+    ]
 
 
 def review_duration_minutes(
     created_at: Optional[datetime], reviewed_at: Optional[datetime]
 ) -> Optional[float]:
-    """Minutes between creation and review, or ``None`` if either is missing."""
+    """Minutes between creation and review, or ``None`` if unmeasurable.
+
+    Returns ``None`` when either timestamp is missing, and also when
+    ``reviewed_at`` precedes ``created_at`` (clock skew or out-of-order data):
+    a negative duration is not a real review time and must not drag the mean
+    below zero.
+    """
     if created_at is None or reviewed_at is None:
         return None
-    return (reviewed_at - created_at).total_seconds() / 60
+    minutes = (reviewed_at - created_at).total_seconds() / 60
+    if minutes < 0:
+        return None
+    return minutes
 
 
 def average_review_minutes(records: Iterable[TxnRecord]) -> float:

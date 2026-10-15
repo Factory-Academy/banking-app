@@ -96,6 +96,13 @@ class TestAverageAmount:
         gen = (Decimal(str(n)) for n in (10, 20, 30))
         assert core.average_amount(gen) == Decimal("20")
 
+    def test_ignores_none_values(self):
+        # A missing amount is skipped from both numerator and denominator.
+        assert core.average_amount([Decimal("100"), None, Decimal("300")]) == Decimal("200")
+
+    def test_all_none_returns_zero(self):
+        assert core.average_amount([None, None]) == Decimal("0")
+
 
 # ---------------------------------------------------------------------------
 # Pure core: location helpers
@@ -138,6 +145,33 @@ class TestLocationHelpers:
 
     def test_top_locations_empty(self):
         assert core.top_locations([]) == []
+
+    def test_location_label_drops_missing_components(self):
+        assert core.location_label("Boston", None) == "Boston"
+        assert core.location_label(None, "US") == "US"
+
+    def test_location_label_blanks_collapse_to_unknown(self):
+        assert core.location_label(None, None) == core.UNKNOWN_LOCATION
+        assert core.location_label("", "   ") == core.UNKNOWN_LOCATION
+
+    def test_top_locations_skips_records_without_location(self):
+        # Only the Boston rows carry a usable location; the blank/None rows are
+        # ignored rather than ranked as a phantom "Unknown" location.
+        records = [
+            make_record(location_city="Boston", location_country="US"),
+            make_record(location_city=None, location_country=None),
+            make_record(location_city="  ", location_country=""),
+        ]
+        assert core.top_locations(records) == ["Boston, US"]
+
+    def test_top_locations_all_missing_is_empty(self):
+        records = [make_record(location_city=None, location_country=None)]
+        assert core.top_locations(records) == []
+
+    def test_top_locations_non_positive_top_n(self):
+        records = [make_record(location_city="Boston", location_country="US")]
+        assert core.top_locations(records, top_n=0) == []
+        assert core.top_locations(records, top_n=-3) == []
 
 
 # ---------------------------------------------------------------------------
@@ -198,6 +232,18 @@ class TestAccountStatistics:
         assert stats.common_locations[0] == "Boston, US"
         assert stats.first_transaction_date == BASE_TIME - timedelta(days=1)
 
+    def test_counts_rows_but_omits_unlocated_from_locations(self):
+        # A location-less row still counts toward the total and the average,
+        # yet never appears among the common locations.
+        records = [
+            make_record(amount=Decimal("100"), location_city="Boston"),
+            make_record(amount=Decimal("300"), location_city=None, location_country=None),
+        ]
+        stats = core.account_statistics(records)
+        assert stats.transaction_count == 2
+        assert stats.average_amount == Decimal("200")
+        assert stats.common_locations == ["Boston, US"]
+
 
 # ---------------------------------------------------------------------------
 # Pure core: time windows
@@ -226,6 +272,13 @@ class TestTimeWindows:
         result = core.within_window([on_start, on_end, before, after], window)
         assert result == [on_start, on_end]
 
+    def test_within_window_skips_missing_timestamp(self):
+        window = core.contextual_window(BASE_TIME, days=1)
+        inside = make_record(timestamp=BASE_TIME)
+        no_timestamp = make_record(timestamp=None)
+        # Must not raise on the ``None`` comparison; the row is simply dropped.
+        assert core.within_window([inside, no_timestamp], window) == [inside]
+
 
 # ---------------------------------------------------------------------------
 # Pure core: review time
@@ -244,6 +297,14 @@ class TestReviewTime:
     def test_duration_none_when_reviewed_missing(self):
         assert core.review_duration_minutes(BASE_TIME, None) is None
 
+    def test_duration_none_when_reviewed_before_created(self):
+        # Clock skew / out-of-order data: a negative duration is unmeasurable.
+        reviewed = BASE_TIME - timedelta(minutes=5)
+        assert core.review_duration_minutes(BASE_TIME, reviewed) is None
+
+    def test_duration_zero_when_simultaneous(self):
+        assert core.review_duration_minutes(BASE_TIME, BASE_TIME) == 0.0
+
     def test_average_empty_returns_zero(self):
         assert core.average_review_minutes([]) == 0.0
 
@@ -259,6 +320,15 @@ class TestReviewTime:
         records = [
             make_record(created_at=BASE_TIME, reviewed_at=BASE_TIME + timedelta(minutes=40)),
             make_record(created_at=None, reviewed_at=None),
+        ]
+        assert core.average_review_minutes(records) == 20.0
+
+    def test_average_excludes_negative_durations_from_numerator(self):
+        # The skewed row contributes nothing to the numerator but still counts
+        # toward the denominator, exactly like an un-timestamped row: 40 / 2.
+        records = [
+            make_record(created_at=BASE_TIME, reviewed_at=BASE_TIME + timedelta(minutes=40)),
+            make_record(created_at=BASE_TIME, reviewed_at=BASE_TIME - timedelta(minutes=10)),
         ]
         assert core.average_review_minutes(records) == 20.0
 
@@ -373,6 +443,18 @@ class TestRecordMapping:
         assert record.status == "CLEARED"
         assert record.risk_level == "LOW"
 
+    def test_to_record_normalizes_blank_locations_to_none(self):
+        txn = make_orm_transaction("TXN-MAP-3", location_city="   ", location_country="")
+        record = to_record(txn)
+        assert record.location_city is None
+        assert record.location_country is None
+
+    def test_to_record_defaults_missing_amount_to_zero(self):
+        txn = make_orm_transaction("TXN-MAP-4")
+        txn.amount = None
+        record = to_record(txn)
+        assert record.amount == Decimal("0")
+
 
 # ---------------------------------------------------------------------------
 # Adapter + core together: repository & service against a real DB session
@@ -422,6 +504,26 @@ class TestAnalyticsService:
         assert stats.average_amount == Decimal("0")
         assert stats.common_locations == []
         assert stats.first_transaction_date is None
+
+    def test_account_statistics_tolerates_unlocated_row(self, db_session):
+        # A stored blank-string location is normalized away at the boundary, so
+        # it never surfaces as a phantom "Unknown" location in the stats.
+        db_session.add(
+            make_orm_transaction("TXN-U1", amount=Decimal("100.00"), location_city="Boston")
+        )
+        db_session.add(
+            make_orm_transaction(
+                "TXN-U2",
+                amount=Decimal("300.00"),
+                location_city="   ",
+                location_country="",
+            )
+        )
+        db_session.commit()
+        stats = AnalyticsService(db_session).account_statistics("**** 4521")
+        assert stats.transaction_count == 2
+        assert stats.average_amount == Decimal("200.00")
+        assert stats.common_locations == ["Boston, US"]
 
     def test_dashboard_counts_statuses_and_risk(self, db_session):
         now = datetime.now()
