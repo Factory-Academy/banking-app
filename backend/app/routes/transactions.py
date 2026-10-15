@@ -16,6 +16,7 @@ from app.schemas.transaction import (
     AccountStats
 )
 from app.services.fraud_detection import FraudDetectionService
+from app.services.analytics import AnalyticsService
 
 router = APIRouter(prefix="/api/v1/transactions", tags=["transactions"])
 
@@ -147,47 +148,13 @@ def get_account_history(transaction_id: str, db: Session = Depends(get_db)):
         .limit(10)\
         .all()
     
-    # Get all transactions for stats calculation
-    all_transactions = db.query(Transaction)\
-        .filter(Transaction.account_number == transaction.account_number)\
-        .all()
-    
-    if not all_transactions:
-        return AccountHistoryResponse(
-            account_number=transaction.account_number,
-            account_holder_name=transaction.account_holder_name,
-            contextual_transactions=[],
-            recent_transactions=[],
-            reviewed_transaction_time=transaction.timestamp,
-            stats=AccountStats(
-                average_amount=Decimal("0"),
-                transaction_count=0,
-                common_locations=[],
-                first_transaction_date=None
-            )
-        )
-    
-    # Calculate stats based on all transactions
-    amounts = [Decimal(str(t.amount)) for t in all_transactions]
-    avg_amount = sum(amounts) / len(amounts) if amounts else Decimal("0")
-    
-    locations = {}
-    for t in all_transactions:
-        loc = f"{t.location_city}, {t.location_country}"
-        locations[loc] = locations.get(loc, 0) + 1
-    
-    common_locations = sorted(locations.keys(), key=lambda x: locations[x], reverse=True)[:3]
-    
-    first_txn = db.query(Transaction)\
-        .filter(Transaction.account_number == transaction.account_number)\
-        .order_by(Transaction.timestamp)\
-        .first()
-    
+    # Calculate account statistics via the analytics service
+    account_stats = AnalyticsService(db).account_statistics(transaction.account_number)
     stats = AccountStats(
-        average_amount=avg_amount,
-        transaction_count=len(all_transactions),
-        common_locations=common_locations,
-        first_transaction_date=first_txn.timestamp if first_txn else None
+        average_amount=account_stats.average_amount,
+        transaction_count=account_stats.transaction_count,
+        common_locations=account_stats.common_locations,
+        first_transaction_date=account_stats.first_transaction_date
     )
     
     return AccountHistoryResponse(
