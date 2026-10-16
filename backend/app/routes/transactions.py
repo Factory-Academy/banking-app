@@ -17,6 +17,11 @@ from app.schemas.transaction import (
 )
 from app.services.fraud_detection import FraudDetectionService
 from app.utils.pagination import paginate_query
+from app.utils.validation import (
+    validate_non_empty_string,
+    validate_in_list,
+    ValidationError
+)
 
 router = APIRouter(prefix="/api/v1/transactions", tags=["transactions"])
 
@@ -211,12 +216,25 @@ def review_transaction(
     if not transaction:
         raise HTTPException(status_code=404, detail="Transaction not found")
     
-    # Validate decision
-    if review.decision not in [TransactionStatus.APPROVED, TransactionStatus.REJECTED, TransactionStatus.ESCALATED]:
-        raise HTTPException(
-            status_code=400,
-            detail="Decision must be APPROVED, REJECTED, or ESCALATED"
+    # Validate decision using validation helper
+    try:
+        valid_statuses = [
+            TransactionStatus.APPROVED,
+            TransactionStatus.REJECTED,
+            TransactionStatus.ESCALATED
+        ]
+        validate_in_list(
+            review.decision,
+            valid_statuses,
+            field_name="decision"
         )
+        
+        # Validate review fields
+        validate_non_empty_string(review.notes, field_name="notes", min_length=1)
+        validate_non_empty_string(review.reviewed_by, field_name="reviewed_by", min_length=1)
+        
+    except ValidationError as e:
+        raise HTTPException(status_code=400, detail=e.message)
     
     # Update transaction
     transaction.status = review.decision
