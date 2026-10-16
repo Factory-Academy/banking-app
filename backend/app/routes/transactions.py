@@ -17,6 +17,7 @@ from app.schemas.transaction import (
 )
 from app.services.fraud_detection import FraudDetectionService
 from app.utils.pagination import paginate_query
+from app.utils.risk_helpers import safe_extract_risk_assessment
 
 router = APIRouter(prefix="/api/v1/transactions", tags=["transactions"])
 
@@ -46,11 +47,12 @@ def create_transaction(
     fraud_service = FraudDetectionService()
     risk_assessment = fraud_service.analyze_transaction(new_txn, account_history)
     
-    # Apply risk assessment
-    new_txn.risk_score = risk_assessment["risk_score"]
-    new_txn.risk_level = risk_assessment["risk_level"]
-    new_txn.status = risk_assessment["status"]
-    new_txn.fraud_flags = risk_assessment["fraud_flags"]
+    # Apply risk assessment using safe extraction
+    safe_assessment = safe_extract_risk_assessment(risk_assessment)
+    new_txn.risk_score = safe_assessment["risk_score"]
+    new_txn.risk_level = safe_assessment["risk_level"]
+    new_txn.status = safe_assessment["status"]
+    new_txn.fraud_flags = safe_assessment["fraud_flags"]
     
     # Save to database
     db.add(new_txn)
