@@ -193,6 +193,13 @@ class TestPaginateQuery:
         
         with pytest.raises(ValueError, match="limit must be between 1 and 500"):
             paginate_query(query, offset=0, limit=501)
+
+    def test_paginate_query_custom_max_limit(self, db_session):
+        """Test pagination with custom max_limit keyword argument"""
+        query = db_session.query(Transaction)
+
+        with pytest.raises(ValueError, match="limit must be between 1 and 100"):
+            paginate_query(query, offset=0, limit=101, max_limit=100)
     
     def test_paginate_query_default_parameters(self, db_session):
         """Test pagination with default parameters"""
