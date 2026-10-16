@@ -38,9 +38,34 @@ def validate_positive_amount(
         Decimal representation of the amount
         
     Raises:
-        ValidationError: If amount is not positive
+        ValidationError: If amount is not positive or invalid
     """
-    amount_decimal = Decimal(str(amount))
+    if amount is None:
+        raise ValidationError(
+            f"{field_name} cannot be null",
+            field=field_name
+        )
+    
+    try:
+        amount_decimal = Decimal(str(amount))
+    except (ValueError, TypeError, Exception) as e:
+        raise ValidationError(
+            f"{field_name} must be a valid number, got {type(amount).__name__}",
+            field=field_name
+        )
+    
+    if amount_decimal.is_nan():
+        raise ValidationError(
+            f"{field_name} cannot be NaN",
+            field=field_name
+        )
+    
+    if amount_decimal.is_infinite():
+        raise ValidationError(
+            f"{field_name} cannot be infinite",
+            field=field_name
+        )
+    
     if amount_decimal <= 0:
         raise ValidationError(
             f"{field_name} must be greater than 0, got {amount_decimal}",
@@ -68,9 +93,43 @@ def validate_amount_range(
         Decimal representation of the amount
         
     Raises:
-        ValidationError: If amount is outside the range
+        ValidationError: If amount is outside the range or invalid
     """
-    amount_decimal = Decimal(str(amount))
+    if amount is None:
+        raise ValidationError(
+            f"{field_name} cannot be null",
+            field=field_name
+        )
+    
+    try:
+        amount_decimal = Decimal(str(amount))
+    except (ValueError, TypeError, Exception):
+        raise ValidationError(
+            f"{field_name} must be a valid number, got {type(amount).__name__}",
+            field=field_name
+        )
+    
+    if amount_decimal.is_nan():
+        raise ValidationError(
+            f"{field_name} cannot be NaN",
+            field=field_name
+        )
+    
+    if amount_decimal.is_infinite():
+        raise ValidationError(
+            f"{field_name} cannot be infinite",
+            field=field_name
+        )
+    
+    # Validate parameter consistency
+    if min_value is not None and max_value is not None:
+        min_decimal = Decimal(str(min_value))
+        max_decimal = Decimal(str(max_value))
+        if min_decimal > max_decimal:
+            raise ValidationError(
+                f"Invalid range: min_value ({min_decimal}) cannot be greater than max_value ({max_decimal})",
+                field=field_name
+            )
     
     if min_value is not None:
         min_decimal = Decimal(str(min_value))
@@ -103,15 +162,34 @@ def validate_non_empty_string(
     Args:
         value: The string to validate
         field_name: Name of the field for error messages
-        min_length: Minimum required length
-        max_length: Maximum allowed length
+        min_length: Minimum required length (must be > 0)
+        max_length: Maximum allowed length (must be >= min_length)
         
     Returns:
         Stripped string value
         
     Raises:
-        ValidationError: If string is empty or outside length bounds
+        ValidationError: If string is empty, outside length bounds, or parameters are invalid
     """
+    # Validate parameters
+    if min_length < 1:
+        raise ValidationError(
+            f"min_length must be at least 1, got {min_length}",
+            field=field_name
+        )
+    
+    if max_length is not None and max_length < min_length:
+        raise ValidationError(
+            f"max_length ({max_length}) cannot be less than min_length ({min_length})",
+            field=field_name
+        )
+    
+    if value is None:
+        raise ValidationError(
+            f"{field_name} cannot be null",
+            field=field_name
+        )
+    
     if not isinstance(value, str):
         raise ValidationError(
             f"{field_name} must be a string, got {type(value).__name__}",
@@ -154,6 +232,12 @@ def validate_enum_value(
     Raises:
         ValidationError: If value is not a valid enum member
     """
+    if value is None:
+        raise ValidationError(
+            f"{field_name} cannot be null",
+            field=field_name
+        )
+    
     # If already an enum member, validate it's from the right enum
     if isinstance(value, Enum):
         if not isinstance(value, enum_class):
@@ -196,8 +280,22 @@ def validate_date_range(
         The validated datetime
         
     Raises:
-        ValidationError: If date is outside the range
+        ValidationError: If date is outside the range or invalid
     """
+    if date is None:
+        raise ValidationError(
+            f"{field_name} cannot be null",
+            field=field_name
+        )
+    
+    # Validate parameter consistency
+    if min_date is not None and max_date is not None:
+        if min_date > max_date:
+            raise ValidationError(
+                f"Invalid date range: min_date ({min_date.isoformat()}) cannot be after max_date ({max_date.isoformat()})",
+                field=field_name
+            )
+    
     if min_date is not None and date < min_date:
         raise ValidationError(
             f"{field_name} must be on or after {min_date.isoformat()}, got {date.isoformat()}",
@@ -223,15 +321,27 @@ def validate_in_list(
     
     Args:
         value: The value to validate
-        allowed_values: List of allowed values
+        allowed_values: List of allowed values (must not be empty)
         field_name: Name of the field for error messages
         
     Returns:
         The validated value
         
     Raises:
-        ValidationError: If value is not in the allowed list
+        ValidationError: If value is not in the allowed list or list is invalid
     """
+    if allowed_values is None:
+        raise ValidationError(
+            f"allowed_values cannot be null for {field_name}",
+            field=field_name
+        )
+    
+    if not allowed_values:
+        raise ValidationError(
+            f"allowed_values cannot be empty for {field_name}",
+            field=field_name
+        )
+    
     if value not in allowed_values:
         raise ValidationError(
             f"{field_name} must be one of {allowed_values}, got {value}",

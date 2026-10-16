@@ -62,6 +62,30 @@ class TestValidatePositiveAmount:
             validate_positive_amount(-10, field_name="price")
         assert "price must be greater than 0" in exc_info.value.message
         assert exc_info.value.field == "price"
+    
+    def test_none_raises_error(self):
+        """Test that None raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_positive_amount(None)
+        assert "cannot be null" in exc_info.value.message
+    
+    def test_nan_raises_error(self):
+        """Test that NaN raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_positive_amount(float('nan'))
+        assert "cannot be NaN" in exc_info.value.message
+    
+    def test_infinity_raises_error(self):
+        """Test that infinity raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_positive_amount(float('inf'))
+        assert "cannot be infinite" in exc_info.value.message
+    
+    def test_invalid_type_raises_error(self):
+        """Test that invalid type raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_positive_amount([100])
+        assert "must be a valid number" in exc_info.value.message
 
 
 class TestValidateAmountRange:
@@ -114,6 +138,37 @@ class TestValidateAmountRange:
         with pytest.raises(ValidationError) as exc_info:
             validate_amount_range(5, min_value=10, field_name="balance")
         assert "balance must be at least" in exc_info.value.message
+    
+    def test_none_raises_error(self):
+        """Test that None raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_amount_range(None, min_value=10, max_value=100)
+        assert "cannot be null" in exc_info.value.message
+    
+    def test_nan_raises_error(self):
+        """Test that NaN raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_amount_range(float('nan'), min_value=10, max_value=100)
+        assert "cannot be NaN" in exc_info.value.message
+    
+    def test_infinity_raises_error(self):
+        """Test that infinity raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_amount_range(float('inf'), min_value=10, max_value=100)
+        assert "cannot be infinite" in exc_info.value.message
+    
+    def test_min_greater_than_max_raises_error(self):
+        """Test that min > max raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_amount_range(50, min_value=100, max_value=10)
+        assert "Invalid range" in exc_info.value.message
+        assert "cannot be greater than" in exc_info.value.message
+    
+    def test_invalid_type_raises_error(self):
+        """Test that invalid type raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_amount_range("invalid", min_value=10, max_value=100)
+        assert "must be a valid number" in exc_info.value.message
 
 
 class TestValidateNonEmptyString:
@@ -170,6 +225,30 @@ class TestValidateNonEmptyString:
             validate_non_empty_string("", field_name="username")
         assert "username must be at least" in exc_info.value.message
         assert exc_info.value.field == "username"
+    
+    def test_none_raises_error(self):
+        """Test that None raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_non_empty_string(None)
+        assert "cannot be null" in exc_info.value.message
+    
+    def test_negative_min_length_raises_error(self):
+        """Test that negative min_length raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_non_empty_string("test", min_length=-1)
+        assert "min_length must be at least 1" in exc_info.value.message
+    
+    def test_zero_min_length_raises_error(self):
+        """Test that zero min_length raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_non_empty_string("test", min_length=0)
+        assert "min_length must be at least 1" in exc_info.value.message
+    
+    def test_max_less_than_min_raises_error(self):
+        """Test that max_length < min_length raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_non_empty_string("test", min_length=10, max_length=5)
+        assert "cannot be less than min_length" in exc_info.value.message
 
 
 class TestValidateEnumValue:
@@ -208,6 +287,12 @@ class TestValidateEnumValue:
         with pytest.raises(ValidationError) as exc_info:
             validate_enum_value("INVALID", TestStatus, field_name="status")
         assert "status must be one of" in exc_info.value.message
+    
+    def test_none_raises_error(self):
+        """Test that None raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_enum_value(None, TestStatus)
+        assert "cannot be null" in exc_info.value.message
 
 
 class TestValidateDateRange:
@@ -280,6 +365,23 @@ class TestValidateDateRange:
         with pytest.raises(ValidationError) as exc_info:
             validate_date_range(tomorrow, max_date=now, field_name="transaction_date")
         assert "transaction_date must be on or before" in exc_info.value.message
+    
+    def test_none_raises_error(self):
+        """Test that None raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_date_range(None)
+        assert "cannot be null" in exc_info.value.message
+    
+    def test_min_after_max_raises_error(self):
+        """Test that min_date > max_date raises ValidationError"""
+        now = datetime.now()
+        yesterday = now - timedelta(days=1)
+        tomorrow = now + timedelta(days=1)
+        
+        with pytest.raises(ValidationError) as exc_info:
+            validate_date_range(now, min_date=tomorrow, max_date=yesterday)
+        assert "Invalid date range" in exc_info.value.message
+        assert "cannot be after" in exc_info.value.message
 
 
 class TestValidateInList:
@@ -317,6 +419,18 @@ class TestValidateInList:
             validate_in_list("option3", allowed, field_name="choice")
         assert "choice must be one of" in exc_info.value.message
         assert exc_info.value.field == "choice"
+    
+    def test_none_allowed_values_raises_error(self):
+        """Test that None allowed_values raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_in_list("test", None)
+        assert "allowed_values cannot be null" in exc_info.value.message
+    
+    def test_empty_allowed_values_raises_error(self):
+        """Test that empty allowed_values raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_in_list("test", [])
+        assert "allowed_values cannot be empty" in exc_info.value.message
 
 
 class TestValidateNotNull:
