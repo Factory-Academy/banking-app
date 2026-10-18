@@ -70,7 +70,13 @@ class PaginatedResult(BaseModel, Generic[T]):
         return (self.total + self.limit - 1) // self.limit
 
 
-def paginate_query(query: Query, offset: int = 0, limit: int = 50) -> Tuple[list, int]:
+def paginate_query(
+    query: Query,
+    offset: int = 0,
+    limit: int = 50,
+    *,
+    max_limit: int = 500
+) -> Tuple[list, int]:
     """
     Apply pagination to a SQLAlchemy query.
     
@@ -78,17 +84,20 @@ def paginate_query(query: Query, offset: int = 0, limit: int = 50) -> Tuple[list
         query: SQLAlchemy Query object
         offset: Number of records to skip (default: 0)
         limit: Maximum number of records to return (default: 50)
+        max_limit: Maximum allowed limit value (default: 500)
     
     Returns:
         tuple: (list of results, total count)
     
     Raises:
-        ValueError: If offset < 0 or limit not in [1, 500]
+        ValueError: If offset < 0, limit is invalid, or max_limit < 1
     """
     if offset < 0:
         raise ValueError("offset must be >= 0")
-    if limit < 1 or limit > 500:
-        raise ValueError("limit must be between 1 and 500")
+    if max_limit < 1:
+        raise ValueError("max_limit must be >= 1")
+    if limit < 1 or limit > max_limit:
+        raise ValueError(f"limit must be between 1 and {max_limit}")
     
     # Get total count before applying pagination
     total = query.count()
