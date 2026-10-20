@@ -10,6 +10,7 @@ from decimal import Decimal
 from datetime import datetime
 from functools import wraps
 from enum import Enum
+from app.utils.number_parsing import NumericParsingError, parse_decimal_value
 
 
 T = TypeVar('T')
@@ -47,10 +48,10 @@ def validate_positive_amount(
         )
     
     try:
-        amount_decimal = Decimal(str(amount))
-    except (ValueError, TypeError, Exception) as e:
+        amount_decimal = parse_decimal_value(amount, field_name)
+    except NumericParsingError as e:
         raise ValidationError(
-            f"{field_name} must be a valid number, got {type(amount).__name__}",
+            e.message,
             field=field_name
         )
     
@@ -102,10 +103,10 @@ def validate_amount_range(
         )
     
     try:
-        amount_decimal = Decimal(str(amount))
-    except (ValueError, TypeError, Exception):
+        amount_decimal = parse_decimal_value(amount, field_name)
+    except NumericParsingError as e:
         raise ValidationError(
-            f"{field_name} must be a valid number, got {type(amount).__name__}",
+            e.message,
             field=field_name
         )
     
@@ -123,8 +124,11 @@ def validate_amount_range(
     
     # Validate parameter consistency
     if min_value is not None and max_value is not None:
-        min_decimal = Decimal(str(min_value))
-        max_decimal = Decimal(str(max_value))
+        try:
+            min_decimal = parse_decimal_value(min_value, "min_value")
+            max_decimal = parse_decimal_value(max_value, "max_value")
+        except NumericParsingError as e:
+            raise ValidationError(e.message, field=e.field_name)
         if min_decimal > max_decimal:
             raise ValidationError(
                 f"Invalid range: min_value ({min_decimal}) cannot be greater than max_value ({max_decimal})",
@@ -132,7 +136,10 @@ def validate_amount_range(
             )
     
     if min_value is not None:
-        min_decimal = Decimal(str(min_value))
+        try:
+            min_decimal = parse_decimal_value(min_value, "min_value")
+        except NumericParsingError as e:
+            raise ValidationError(e.message, field=e.field_name)
         if amount_decimal < min_decimal:
             raise ValidationError(
                 f"{field_name} must be at least {min_decimal}, got {amount_decimal}",
@@ -140,7 +147,10 @@ def validate_amount_range(
             )
     
     if max_value is not None:
-        max_decimal = Decimal(str(max_value))
+        try:
+            max_decimal = parse_decimal_value(max_value, "max_value")
+        except NumericParsingError as e:
+            raise ValidationError(e.message, field=e.field_name)
         if amount_decimal > max_decimal:
             raise ValidationError(
                 f"{field_name} must be at most {max_decimal}, got {amount_decimal}",

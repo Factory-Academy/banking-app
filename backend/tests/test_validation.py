@@ -3,6 +3,7 @@ import pytest
 from decimal import Decimal
 from datetime import datetime, timedelta
 from enum import Enum
+from app.utils.number_parsing import NumericParsingError, parse_decimal_value
 from app.utils.validation import (
     ValidationError,
     validate_positive_amount,
@@ -23,6 +24,20 @@ class TestStatus(Enum):
     ACTIVE = "active"
     INACTIVE = "inactive"
     PENDING = "pending"
+
+
+class TestParseDecimalValue:
+    """Tests for parse_decimal_value helper"""
+
+    def test_parse_decimal_value_success(self):
+        result = parse_decimal_value("100.50", "amount")
+        assert result == Decimal("100.50")
+
+    def test_parse_decimal_value_error(self):
+        with pytest.raises(NumericParsingError) as exc_info:
+            parse_decimal_value([100], "amount")
+        assert exc_info.value.field_name == "amount"
+        assert "must be a valid number" in exc_info.value.message
 
 
 class TestValidatePositiveAmount:
@@ -169,6 +184,20 @@ class TestValidateAmountRange:
         with pytest.raises(ValidationError) as exc_info:
             validate_amount_range("invalid", min_value=10, max_value=100)
         assert "must be a valid number" in exc_info.value.message
+
+    def test_invalid_min_value_type_raises_error(self):
+        """Test that invalid min_value type raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_amount_range(50, min_value=[10], max_value=100)
+        assert "min_value must be a valid number" in exc_info.value.message
+        assert exc_info.value.field == "min_value"
+
+    def test_invalid_max_value_type_raises_error(self):
+        """Test that invalid max_value type raises ValidationError"""
+        with pytest.raises(ValidationError) as exc_info:
+            validate_amount_range(50, min_value=10, max_value={"value": 100})
+        assert "max_value must be a valid number" in exc_info.value.message
+        assert exc_info.value.field == "max_value"
 
 
 class TestValidateNonEmptyString:
