@@ -88,6 +88,12 @@ def paginate_query(
     
     Returns:
         tuple: (list of results, total count)
+
+    Example:
+        ```python
+        query = db_session.query(Transaction).filter(Transaction.status == TransactionStatus.CLEARED)
+        items, total = paginate_query(query, offset=0, limit=25, max_limit=100)
+        ```
     
     Raises:
         ValueError: If offset < 0, limit is invalid, or max_limit < 1
