@@ -92,6 +92,8 @@ def paginate_query(
     Raises:
         ValueError: If offset < 0, limit is invalid, or max_limit < 1
     """
+    if query is None:
+        raise ValueError("query cannot be None")
     if offset < 0:
         raise ValueError("offset must be >= 0")
     if max_limit < 1:
@@ -129,6 +131,8 @@ def create_paginated_response(
     Raises:
         ValueError: If total or offset are negative, or limit is < 1
     """
+    if items is None:
+        raise ValueError("items cannot be None")
     if total < 0:
         raise ValueError("total must be >= 0")
     if offset < 0:

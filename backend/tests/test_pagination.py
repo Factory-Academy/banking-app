@@ -179,6 +179,11 @@ class TestPaginateQuery:
         
         with pytest.raises(ValueError, match="offset must be >= 0"):
             paginate_query(query, offset=-1, limit=10)
+
+    def test_paginate_query_none_query(self):
+        """Test paginate_query rejects None query"""
+        with pytest.raises(ValueError, match="query cannot be None"):
+            paginate_query(None, offset=0, limit=10)
     
     def test_paginate_query_invalid_limit_too_low(self, db_session):
         """Test pagination with limit < 1 raises error"""
@@ -295,6 +300,11 @@ class TestCreatePaginatedResponse:
         """Test create_paginated_response rejects limit < 1"""
         with pytest.raises(ValueError, match="limit must be >= 1"):
             create_paginated_response([], total=0, offset=0, limit=0)
+
+    def test_create_paginated_response_none_items(self):
+        """Test create_paginated_response rejects None items"""
+        with pytest.raises(ValueError, match="items cannot be None"):
+            create_paginated_response(None, total=0, offset=0, limit=10)
 
 
 class TestPaginationParams:
