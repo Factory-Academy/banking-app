@@ -173,6 +173,20 @@ class TestGeographicAnomalyRule:
         
         assert rule.evaluate(base_transaction, [prev_txn]) is False
 
+    def test_calculate_distance_accepts_custom_earth_radius(self):
+        rule = GeographicAnomalyRule()
+
+        default_distance = rule._calculate_distance(0.0, 0.0, 0.0, 1.0)
+        custom_distance = rule._calculate_distance(
+            0.0,
+            0.0,
+            0.0,
+            1.0,
+            earth_radius_km=7000
+        )
+
+        assert custom_distance > default_distance
+
 
 class TestUnusualTimeRule:
     def test_triggers_at_2am(self, base_transaction):
