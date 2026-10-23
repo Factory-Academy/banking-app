@@ -187,6 +187,12 @@ class TestGeographicAnomalyRule:
 
         assert custom_distance > default_distance
 
+    def test_calculate_distance_rejects_non_positive_earth_radius(self):
+        rule = GeographicAnomalyRule()
+
+        with pytest.raises(ValueError, match="earth_radius_km must be positive"):
+            rule._calculate_distance(0.0, 0.0, 0.0, 1.0, earth_radius_km=0)
+
 
 class TestUnusualTimeRule:
     def test_triggers_at_2am(self, base_transaction):

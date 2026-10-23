@@ -86,6 +86,9 @@ class GeographicAnomalyRule(FraudRule):
         earth_radius_km: float = 6371
     ) -> float:
         """Calculate distance in km using Haversine formula"""
+        if earth_radius_km <= 0:
+            raise ValueError("earth_radius_km must be positive")
+
         lat1, lon1, lat2, lon2 = map(radians, [lat1, lon1, lat2, lon2])
         dlat = lat2 - lat1
         dlon = lon2 - lon1
