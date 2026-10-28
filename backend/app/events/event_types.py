@@ -1,35 +1,25 @@
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from decimal import Decimal
-from typing import Optional, Sequence, Tuple
+from typing import Optional, Sequence
+
+from app.events.validators import (
+    freeze_flags,
+    require_positive_amount,
+    require_risk_score,
+    require_text,
+)
 
 
-def _require_text(field_name: str, value: str) -> None:
-    """Reject identifiers that are missing, blank, or whitespace-only.
+def _utcnow() -> datetime:
+    """Return the current time as a timezone-aware UTC timestamp.
 
-    Events describe something that already happened, so an empty
-    ``transaction_id`` (or similar) almost always signals a construction bug in
-    the publisher rather than a legitimate value. Failing fast here surfaces it
-    at the publish site instead of somewhere downstream in a subscriber.
+    Events stamp *when* they occurred so subscribers can order and serialize
+    them. A naive ``datetime.now()`` would silently inherit the host's local
+    zone and compare incorrectly against aware timestamps (and raise when
+    subtracted from one), so events always carry an explicit UTC offset.
     """
-    if not isinstance(value, str) or not value.strip():
-        raise ValueError(f"{field_name} must be a non-empty string")
-
-
-def _require_non_negative(field_name: str, value: int) -> None:
-    if not isinstance(value, int) or isinstance(value, bool) or value < 0:
-        raise ValueError(f"{field_name} must be a non-negative integer")
-
-
-def _freeze_flags(value: Sequence[str]) -> Tuple[str, ...]:
-    """Normalize a flag collection into an immutable tuple.
-
-    Callers routinely hand us a ``list`` pulled straight off an ORM object. A
-    frozen dataclass that stored that list would still let a subscriber mutate
-    it in place and affect every other subscriber, so we copy it into a tuple
-    to make the immutability guarantee real rather than nominal.
-    """
-    return tuple(value)
+    return datetime.now(timezone.utc)
 
 
 @dataclass(frozen=True)
@@ -41,10 +31,11 @@ class Event:
     reason about ordering independently of when they are actually delivered.
 
     ``occurred_at`` is keyword-only so that subclasses can declare their own
-    required positional fields without colliding with this default.
+    required positional fields without colliding with this default, and it is
+    timezone-aware UTC so timestamps across events are directly comparable.
     """
 
-    occurred_at: datetime = field(default_factory=datetime.now, kw_only=True)
+    occurred_at: datetime = field(default_factory=_utcnow, kw_only=True)
 
 
 @dataclass(frozen=True)
@@ -60,10 +51,13 @@ class TransactionCreated(Event):
     fraud_flags: Sequence[str] = ()
 
     def __post_init__(self) -> None:
-        _require_text("transaction_id", self.transaction_id)
-        _require_text("account_number", self.account_number)
-        _require_non_negative("risk_score", self.risk_score)
-        object.__setattr__(self, "fraud_flags", _freeze_flags(self.fraud_flags))
+        require_text("transaction_id", self.transaction_id)
+        require_text("account_number", self.account_number)
+        require_text("risk_level", self.risk_level)
+        require_text("status", self.status)
+        require_positive_amount("amount", self.amount)
+        require_risk_score("risk_score", self.risk_score)
+        object.__setattr__(self, "fraud_flags", freeze_flags(self.fraud_flags))
 
 
 @dataclass(frozen=True)
@@ -76,10 +70,10 @@ class TransactionHeld(Event):
     fraud_flags: Sequence[str] = ()
 
     def __post_init__(self) -> None:
-        _require_text("transaction_id", self.transaction_id)
-        _require_text("account_number", self.account_number)
-        _require_non_negative("risk_score", self.risk_score)
-        object.__setattr__(self, "fraud_flags", _freeze_flags(self.fraud_flags))
+        require_text("transaction_id", self.transaction_id)
+        require_text("account_number", self.account_number)
+        require_risk_score("risk_score", self.risk_score)
+        object.__setattr__(self, "fraud_flags", freeze_flags(self.fraud_flags))
 
 
 @dataclass(frozen=True)
@@ -92,6 +86,6 @@ class TransactionReviewed(Event):
     notes: Optional[str] = None
 
     def __post_init__(self) -> None:
-        _require_text("transaction_id", self.transaction_id)
-        _require_text("decision", self.decision)
-        _require_text("reviewed_by", self.reviewed_by)
+        require_text("transaction_id", self.transaction_id)
+        require_text("decision", self.decision)
+        require_text("reviewed_by", self.reviewed_by)

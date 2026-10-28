@@ -18,24 +18,46 @@ decide *what to do about it*.
 | File | Responsibility |
 | --- | --- |
 | `event_types.py` | Immutable, validated event value objects. |
+| `validators.py` | Reusable field validation rules shared by the event types. |
 | `bus.py` | `EventBus` dispatch plus the shared `event_bus` singleton. |
 | `subscribers.py` | Built-in audit subscribers and `register_default_subscribers`. |
-| `__init__.py` | Public surface (`event_bus`, event classes, helpers). |
+| `__init__.py` | Public surface (`event_bus`, event classes, validators, helpers). |
 
 ## Events
 
 All events subclass `Event`, a frozen dataclass that stamps `occurred_at`
-(keyword-only) at construction. Events are immutable value objects describing
-something that already happened:
+(keyword-only) at construction. `occurred_at` is a **timezone-aware UTC**
+timestamp (`datetime.now(timezone.utc)`), so timestamps from different events
+are directly comparable and serialize with an explicit offset -- a naive local
+time would compare incorrectly and raise when subtracted from an aware one.
+Events are immutable value objects describing something that already happened:
 
 - `TransactionCreated` - a transaction was created and scored.
 - `TransactionHeld` - a transaction was auto-held as HIGH risk.
 - `TransactionReviewed` - an analyst reached a decision.
 
-Each event validates itself in `__post_init__`: identifier fields must be
-non-empty strings, `risk_score` must be a non-negative integer, and
-`fraud_flags` is copied into an immutable tuple so a subscriber cannot mutate a
-list shared with other subscribers.
+## Field validation
+
+Each event validates itself in `__post_init__` using the shared helpers in
+`validators.py`, so a malformed field fails loudly at the publish site instead
+of corrupting a subscriber downstream:
+
+- **Identifiers** (`transaction_id`, `account_number`, `risk_level`, `status`,
+  `decision`, `reviewed_by`) must be non-empty, non-whitespace strings.
+- **`risk_score`** must be a non-negative integer. `bool` is rejected even
+  though it is an `int` subclass. There is deliberately **no upper bound**: the
+  fraud rules are additive and their combined score can exceed any single
+  rule's weight (the rules currently sum to 200).
+- **`amount`** must be a finite, strictly positive `Decimal`. Zero, negative,
+  `NaN`, `Infinity`, and non-`Decimal` values are rejected; keeping money as
+  `Decimal` avoids binary-float rounding.
+- **`fraud_flags`** is copied into an immutable tuple so a subscriber cannot
+  mutate a list shared with others. A bare `str`/`bytes` is rejected (it would
+  otherwise explode into one flag per character), and every element must be a
+  non-empty string.
+
+The validator helpers are also exported from `app.events`, so a new event type
+can reuse the same rules rather than re-implementing them.
 
 ## Dispatch semantics
 
@@ -97,9 +119,12 @@ handler and subscribe it; no route code needs to change.
 
 ## Testing
 
-- `tests/test_events.py` - unit tests for event validation/immutability and the
-  full `EventBus` contract (ordering, de-duplication, isolation, unsubscribe,
-  the `on` decorator, `clear`, thread safety, and the default subscribers).
+- `tests/test_event_validators.py` - unit tests for the shared field validators
+  (text, risk score, positive amount, and flag freezing) and their edge cases.
+- `tests/test_events.py` - unit tests for event validation/immutability
+  (including timezone-aware `occurred_at`) and the full `EventBus` contract
+  (ordering, de-duplication, isolation, unsubscribe, the `on` decorator,
+  `clear`, thread safety, and the default subscribers).
 - `tests/test_events_integration.py` - verifies the routes publish the expected
   events on the shared bus and that a failing subscriber never breaks a request.
 

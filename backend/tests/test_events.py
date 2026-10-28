@@ -1,6 +1,7 @@
 import logging
 import threading
 from dataclasses import FrozenInstanceError
+from datetime import timezone
 from decimal import Decimal
 
 import pytest
@@ -52,6 +53,12 @@ class TestEventTypes:
         event = make_created()
         assert event.occurred_at is not None
 
+    def test_occurred_at_is_timezone_aware_utc(self):
+        event = make_created()
+        assert event.occurred_at.tzinfo is not None
+        # Normalized to a zero UTC offset so timestamps are directly comparable.
+        assert event.occurred_at.utcoffset() == timezone.utc.utcoffset(None)
+
     def test_occurred_at_is_keyword_only(self):
         # It must not be assignable as a trailing positional argument.
         with pytest.raises(TypeError):
@@ -97,6 +104,32 @@ class TestEventTypes:
 
     def test_zero_risk_score_is_allowed(self):
         assert make_created(risk_score=0).risk_score == 0
+
+    def test_high_additive_risk_score_is_allowed(self):
+        # Fraud rules are additive and can sum well past any single weight.
+        assert make_created(risk_score=200).risk_score == 200
+
+    @pytest.mark.parametrize("bad", [Decimal("0"), Decimal("-5"), Decimal("NaN"), 100, "100"])
+    def test_non_positive_or_non_decimal_amount_is_rejected(self, bad):
+        with pytest.raises(ValueError):
+            make_created(amount=bad)
+
+    def test_blank_risk_level_is_rejected(self):
+        with pytest.raises(ValueError):
+            make_created(risk_level="")
+
+    def test_blank_status_is_rejected(self):
+        with pytest.raises(ValueError):
+            make_created(status="  ")
+
+    def test_fraud_flags_passed_as_bare_string_is_rejected(self):
+        # Would otherwise explode into one flag per character.
+        with pytest.raises(TypeError):
+            make_created(fraud_flags="high_amount")
+
+    def test_fraud_flags_with_blank_element_is_rejected(self):
+        with pytest.raises(ValueError):
+            make_created(fraud_flags=["high_amount", ""])
 
     def test_reviewed_requires_decision_and_reviewer(self):
         with pytest.raises(ValueError):

@@ -49,6 +49,8 @@ def test_create_cleared_publishes_created_only(client, spy):
     assert event.transaction_id == response.json()["id"]
     assert event.amount == Decimal("100.00")
     assert event.status == "CLEARED"
+    # Events published through the route carry timezone-aware UTC timestamps.
+    assert event.occurred_at.tzinfo is not None
 
 
 def test_create_high_risk_publishes_created_and_held(client, spy):

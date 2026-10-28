@@ -6,6 +6,12 @@ from app.events.event_types import (
     TransactionReviewed,
 )
 from app.events.subscribers import register_default_subscribers
+from app.events.validators import (
+    freeze_flags,
+    require_positive_amount,
+    require_risk_score,
+    require_text,
+)
 
 __all__ = [
     "EventBus",
@@ -17,4 +23,8 @@ __all__ = [
     "TransactionHeld",
     "TransactionReviewed",
     "register_default_subscribers",
+    "freeze_flags",
+    "require_positive_amount",
+    "require_risk_score",
+    "require_text",
 ]
