@@ -16,6 +16,12 @@ from app.schemas.transaction import (
     AccountStats
 )
 from app.services.fraud_detection import FraudDetectionService
+from app.events import (
+    event_bus,
+    TransactionCreated,
+    TransactionHeld,
+    TransactionReviewed,
+)
 
 router = APIRouter(prefix="/api/v1/transactions", tags=["transactions"])
 
@@ -55,6 +61,26 @@ def create_transaction(
     db.add(new_txn)
     db.commit()
     db.refresh(new_txn)
+    
+    # Announce the transaction so audit/notification subscribers can react.
+    # Publishing is isolated by the bus, so a failing subscriber never breaks
+    # the request path.
+    event_bus.publish(TransactionCreated(
+        transaction_id=new_txn.id,
+        account_number=new_txn.account_number,
+        amount=Decimal(str(new_txn.amount)),
+        risk_score=new_txn.risk_score,
+        risk_level=new_txn.risk_level.value,
+        status=new_txn.status.value,
+        fraud_flags=new_txn.fraud_flags or [],
+    ))
+    if new_txn.status == TransactionStatus.HELD:
+        event_bus.publish(TransactionHeld(
+            transaction_id=new_txn.id,
+            account_number=new_txn.account_number,
+            risk_score=new_txn.risk_score,
+            fraud_flags=new_txn.fraud_flags or [],
+        ))
     
     return new_txn
 
@@ -228,5 +254,12 @@ def review_transaction(
     
     db.commit()
     db.refresh(transaction)
+    
+    event_bus.publish(TransactionReviewed(
+        transaction_id=transaction.id,
+        decision=transaction.status.value,
+        reviewed_by=transaction.reviewed_by,
+        notes=transaction.review_notes,
+    ))
     
     return transaction
