@@ -46,10 +46,10 @@ def create_transaction(
     risk_assessment = fraud_service.analyze_transaction(new_txn, account_history)
     
     # Apply risk assessment
-    new_txn.risk_score = risk_assessment["risk_score"]
-    new_txn.risk_level = risk_assessment["risk_level"]
-    new_txn.status = risk_assessment["status"]
-    new_txn.fraud_flags = risk_assessment["fraud_flags"]
+    new_txn.risk_score = risk_assessment.risk_score
+    new_txn.risk_level = risk_assessment.risk_level
+    new_txn.status = risk_assessment.status
+    new_txn.fraud_flags = list(risk_assessment.fraud_flags)
     
     # Save to database
     db.add(new_txn)
