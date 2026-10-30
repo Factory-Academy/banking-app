@@ -1,9 +1,11 @@
 import random
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import List, Dict, Any
+from typing import Dict, Any
 import httpx
 import sys
+
+from app.domain.seeding import TransactionDraft
 
 # Sample data
 FIRST_NAMES = ["John", "Sarah", "Michael", "Emily", "David", "Lisa", "James", "Jennifer", "Robert", "Mary",
@@ -99,28 +101,28 @@ class DataGenerator:
         lat: float,
         lng: float,
         timestamp: datetime
-    ) -> Dict[str, Any]:
-        """Build transaction data dict for API POST"""
-        return {
-            "account_number": account_number,
-            "account_holder_name": account_holder,
-            "amount": str(amount),
-            "merchant_name": merchant_name,
-            "merchant_category": category,
-            "transaction_type": txn_type,
-            "location_city": city,
-            "location_country": country,
-            "latitude": lat,
-            "longitude": lng,
-            "timestamp": timestamp.isoformat()
-        }
+    ) -> TransactionDraft:
+        """Build a typed transaction draft for API POST"""
+        return TransactionDraft(
+            account_number=account_number,
+            account_holder_name=account_holder,
+            amount=amount,
+            merchant_name=merchant_name,
+            merchant_category=category,
+            transaction_type=txn_type,
+            location_city=city,
+            location_country=country,
+            latitude=lat,
+            longitude=lng,
+            timestamp=timestamp,
+        )
     
-    def create_transaction_via_api(self, transaction_data: Dict[str, Any]) -> Dict[str, Any]:
+    def create_transaction_via_api(self, draft: TransactionDraft) -> Dict[str, Any]:
         """Post transaction to API endpoint"""
         try:
             response = self.client.post(
                 f"{self.api_url}/transactions",
-                json=transaction_data
+                json=draft.to_api_payload()
             )
             response.raise_for_status()
             return response.json()
@@ -144,7 +146,7 @@ class DataGenerator:
         account_holder: str,
         home_city: tuple,
         timestamp: datetime
-    ) -> Dict[str, Any]:
+    ) -> TransactionDraft:
         """Generate a normal transaction"""
         merchant_name, category = random.choice(NORMAL_MERCHANTS)
         amount = Decimal(str(round(random.uniform(5, 500), 2)))
@@ -172,7 +174,7 @@ class DataGenerator:
         account_holder: str,
         home_city: tuple,
         timestamp: datetime
-    ) -> Dict[str, Any]:
+    ) -> TransactionDraft:
         """Generate a medium risk transaction"""
         merchant_name, category = random.choice(HIGH_VALUE_MERCHANTS)
         amount = Decimal(str(round(random.uniform(500, 2000), 2)))
@@ -203,7 +205,7 @@ class DataGenerator:
         account_holder: str,
         home_city: tuple,
         timestamp: datetime
-    ) -> Dict[str, Any]:
+    ) -> TransactionDraft:
         """Generate a suspicious transaction (might trigger fraud rules, but we don't know)"""
         scenario = random.choice([
             "international_night",

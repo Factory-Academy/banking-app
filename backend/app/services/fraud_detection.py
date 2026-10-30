@@ -1,8 +1,9 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import List, Dict, Any
+from typing import List
 from abc import ABC, abstractmethod
-from app.models.transaction import Transaction, TransactionStatus, RiskLevel
+from app.domain.fraud import RiskAssessment, RuleOutcome
+from app.models.transaction import Transaction
 from math import radians, sin, cos, sqrt, atan2
 
 
@@ -153,35 +154,20 @@ class FraudDetectionService:
         self,
         transaction: Transaction,
         account_history: List[Transaction]
-    ) -> Dict[str, Any]:
+    ) -> RiskAssessment:
         """
-        Analyze a transaction and return risk assessment
-        
-        Returns:
-            dict with risk_score, risk_level, status, and fraud_flags
+        Analyze a transaction and return its risk assessment.
+
+        Each rule is evaluated into a RuleOutcome, then aggregated into a
+        RiskAssessment carrying the total score, risk level, resulting status,
+        and the flags for the rules that triggered.
         """
-        total_score = 0
-        flags = []
-        
-        for rule in self.rules:
-            if rule.evaluate(transaction, account_history):
-                total_score += rule.risk_points
-                flags.append(rule.name)
-        
-        # Determine risk level and status
-        if total_score >= 70:
-            risk_level = RiskLevel.HIGH
-            status = TransactionStatus.HELD
-        elif total_score >= 40:
-            risk_level = RiskLevel.MEDIUM
-            status = TransactionStatus.CLEARED
-        else:
-            risk_level = RiskLevel.LOW
-            status = TransactionStatus.CLEARED
-        
-        return {
-            "risk_score": total_score,
-            "risk_level": risk_level,
-            "status": status,
-            "fraud_flags": flags
-        }
+        outcomes = [
+            RuleOutcome(
+                name=rule.name,
+                risk_points=rule.risk_points,
+                triggered=rule.evaluate(transaction, account_history),
+            )
+            for rule in self.rules
+        ]
+        return RiskAssessment.from_outcomes(outcomes)

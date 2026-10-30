@@ -310,9 +310,9 @@ class TestAmountDeviationRule:
 class TestFraudDetectionService:
     def test_low_risk_cleared(self, fraud_service, base_transaction):
         result = fraud_service.analyze_transaction(base_transaction, [])
-        assert result["risk_level"] == RiskLevel.LOW
-        assert result["status"] == TransactionStatus.CLEARED
-        assert result["risk_score"] < 40
+        assert result.risk_level == RiskLevel.LOW
+        assert result.status == TransactionStatus.CLEARED
+        assert result.risk_score < 40
     
     def test_high_risk_held(self, fraud_service, base_transaction):
         # Create transaction that triggers multiple rules
@@ -322,12 +322,12 @@ class TestFraudDetectionService:
         # Total: 75 points -> HIGH risk
         
         result = fraud_service.analyze_transaction(base_transaction, [])
-        assert result["risk_level"] == RiskLevel.HIGH
-        assert result["status"] == TransactionStatus.HELD
-        assert result["risk_score"] >= 70
-        assert "high_amount" in result["fraud_flags"]
-        assert "first_international" in result["fraud_flags"]
-        assert "unusual_time" in result["fraud_flags"]
+        assert result.risk_level == RiskLevel.HIGH
+        assert result.status == TransactionStatus.HELD
+        assert result.risk_score >= 70
+        assert "high_amount" in result.fraud_flags
+        assert "first_international" in result.fraud_flags
+        assert "unusual_time" in result.fraud_flags
     
     def test_medium_risk_cleared(self, fraud_service, base_transaction):
         # Create transaction with medium risk
@@ -356,6 +356,6 @@ class TestFraudDetectionService:
         
         result = fraud_service.analyze_transaction(base_transaction, history)
         # First intl (25) + amount deviation (35) = 60 points -> MEDIUM
-        assert result["risk_level"] == RiskLevel.MEDIUM
-        assert result["status"] == TransactionStatus.CLEARED
-        assert 40 <= result["risk_score"] < 70
+        assert result.risk_level == RiskLevel.MEDIUM
+        assert result.status == TransactionStatus.CLEARED
+        assert 40 <= result.risk_score < 70

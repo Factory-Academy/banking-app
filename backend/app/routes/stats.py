@@ -3,6 +3,7 @@ from fastapi import APIRouter, Depends
 from sqlalchemy.orm import Session
 from sqlalchemy import func, and_
 from app.database import get_db
+from app.domain.stats import DashboardStats, RiskBreakdown
 from app.models.transaction import Transaction, TransactionStatus, RiskLevel
 from app.schemas.transaction import StatsResponse
 
@@ -50,29 +51,32 @@ def get_dashboard_stats(db: Session = Depends(get_db)):
         )
     ).all()
     
-    if reviewed_transactions:
-        total_minutes = sum(
-            (t.reviewed_at - t.created_at).total_seconds() / 60
-            for t in reviewed_transactions
-            if t.reviewed_at and t.created_at
-        )
-        avg_review_time = total_minutes / len(reviewed_transactions)
-    else:
-        avg_review_time = 0.0
+    avg_review_time = DashboardStats.average_review_minutes(
+        (t.created_at, t.reviewed_at) for t in reviewed_transactions
+    )
     
     # Count by risk level
-    risk_counts = {}
-    for risk_level in RiskLevel:
-        count = db.query(Transaction).filter(
+    risk_counts = {
+        risk_level: db.query(Transaction).filter(
             Transaction.risk_level == risk_level
         ).count()
-        risk_counts[risk_level.value] = count
+        for risk_level in RiskLevel
+    }
     
-    return StatsResponse(
+    stats = DashboardStats(
         held_count=held_count,
         approved_today=approved_today,
         rejected_today=rejected_today,
         escalated_count=escalated_count,
         avg_review_time_minutes=round(avg_review_time, 1),
-        transactions_by_risk=risk_counts
+        risk_breakdown=RiskBreakdown.from_counts(risk_counts),
+    )
+    
+    return StatsResponse(
+        held_count=stats.held_count,
+        approved_today=stats.approved_today,
+        rejected_today=stats.rejected_today,
+        escalated_count=stats.escalated_count,
+        avg_review_time_minutes=stats.avg_review_time_minutes,
+        transactions_by_risk=stats.risk_breakdown.as_dict(),
     )
