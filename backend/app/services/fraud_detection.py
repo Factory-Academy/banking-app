@@ -1,9 +1,11 @@
 from datetime import datetime, timedelta
 from decimal import Decimal
-from typing import List
+from typing import List, Optional
 from abc import ABC, abstractmethod
 from app.domain.fraud import RiskAssessment, RuleOutcome
 from app.models.transaction import Transaction
+from app.services.fraud import ScoringStrategy, create_scoring_strategy
+from app.services.fraud.scoring import AdditiveScoringStrategy
 from math import radians, sin, cos, sqrt, atan2
 
 
@@ -138,9 +140,15 @@ class AmountDeviationRule(FraudRule):
 
 
 class FraudDetectionService:
-    """Service for detecting fraudulent transactions"""
-    
-    def __init__(self):
+    """Service for detecting fraudulent transactions.
+
+    The rules decide *which* signals fire; a pluggable
+    :class:`~app.services.fraud.ScoringStrategy` decides how those signals
+    combine into a score. The strategy defaults to additive scoring, so existing
+    behaviour is preserved unless a caller opts into another policy.
+    """
+
+    def __init__(self, scoring_strategy: Optional[ScoringStrategy] = None):
         self.rules: List[FraudRule] = [
             HighAmountRule(),
             VelocityRule(),
@@ -149,7 +157,15 @@ class FraudDetectionService:
             FirstInternationalRule(),
             AmountDeviationRule()
         ]
-    
+        self.scoring_strategy: ScoringStrategy = (
+            scoring_strategy or AdditiveScoringStrategy()
+        )
+
+    @classmethod
+    def with_strategy(cls, name: str, **kwargs: object) -> "FraudDetectionService":
+        """Build a service whose scoring policy is chosen by name via the factory."""
+        return cls(scoring_strategy=create_scoring_strategy(name, **kwargs))
+
     def analyze_transaction(
         self,
         transaction: Transaction,
@@ -158,9 +174,10 @@ class FraudDetectionService:
         """
         Analyze a transaction and return its risk assessment.
 
-        Each rule is evaluated into a RuleOutcome, then aggregated into a
-        RiskAssessment carrying the total score, risk level, resulting status,
-        and the flags for the rules that triggered.
+        Each rule is evaluated into a RuleOutcome, the configured scoring
+        strategy aggregates those outcomes into a total score, and the score plus
+        the triggered flags are turned into a RiskAssessment carrying the risk
+        level and resulting status.
         """
         outcomes = [
             RuleOutcome(
@@ -170,4 +187,6 @@ class FraudDetectionService:
             )
             for rule in self.rules
         ]
-        return RiskAssessment.from_outcomes(outcomes)
+        score = self.scoring_strategy.score(outcomes)
+        flags = [outcome.name for outcome in outcomes if outcome.triggered]
+        return RiskAssessment.from_score(score, flags)
