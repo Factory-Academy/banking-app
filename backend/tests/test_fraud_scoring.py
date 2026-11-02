@@ -12,14 +12,18 @@ from app.domain.fraud import (
 )
 from app.models.transaction import RiskLevel, Transaction, TransactionStatus
 from app.services.fraud import (
+    SCORE_FLOOR,
     AdditiveScoringStrategy,
     DampenedScoringStrategy,
     ScoringStrategy,
     available_strategies,
+    clamp_score,
     create_scoring_strategy,
     register_scoring_strategy,
+    round_half_up,
+    temporary_strategy,
+    unregister_scoring_strategy,
 )
-from app.services.fraud import factory as factory_module
 from app.services.fraud_detection import FraudDetectionService
 
 
@@ -74,6 +78,21 @@ class TestAdditiveScoringStrategy:
         strategy = AdditiveScoringStrategy()
         assert strategy.score(forward) == strategy.score(reverse) == 50
 
+    def test_negative_points_clamp_to_floor(self):
+        # A malformed rule carrying negative points must not drive the score
+        # below zero, where classify() would reject it.
+        outcomes = [outcome("a", 30, True), outcome("b", -100, True)]
+        assert AdditiveScoringStrategy().score(outcomes) == SCORE_FLOOR
+
+    def test_score_is_never_negative(self):
+        outcomes = [outcome("a", -50, True)]
+        assert AdditiveScoringStrategy().score(outcomes) >= SCORE_FLOOR
+
+    def test_large_sum_is_not_capped(self):
+        # No upper bound: additive stays explainable even past 100.
+        outcomes = [outcome("a", 80, True), outcome("b", 70, True)]
+        assert AdditiveScoringStrategy().score(outcomes) == 150
+
     def test_name(self):
         assert AdditiveScoringStrategy.name == "additive"
         assert AdditiveScoringStrategy().name == "additive"
@@ -126,6 +145,12 @@ class TestDampenedScoringStrategy:
         outcomes = [outcome("a", 30, True), outcome("b", 100, False)]
         assert DampenedScoringStrategy(decay=0.5).score(outcomes) == 30
 
+    def test_negative_points_clamp_to_floor(self):
+        # Negatives sort last (ranked highest-first) and still cannot push the
+        # dampened aggregate below the floor.
+        outcomes = [outcome("a", 10, True), outcome("b", -100, True)]
+        assert DampenedScoringStrategy(decay=0.5).score(outcomes) == SCORE_FLOOR
+
     @pytest.mark.parametrize("bad_decay", [0.0, -0.1, 1.1, 2.0])
     def test_rejects_out_of_range_decay(self, bad_decay):
         with pytest.raises(ValueError, match="decay must be in"):
@@ -161,18 +186,101 @@ class TestFactory:
 
     def test_register_and_use_custom_strategy(self):
         name = "test-constant"
-        try:
-            register_scoring_strategy(name, lambda: AdditiveScoringStrategy())
+        with temporary_strategy(name, lambda: AdditiveScoringStrategy()):
             assert name in available_strategies()
             assert isinstance(
                 create_scoring_strategy(name), AdditiveScoringStrategy
             )
-        finally:
-            factory_module._REGISTRY.pop(name, None)
 
     def test_register_duplicate_rejected(self):
         with pytest.raises(ValueError, match="already registered"):
             register_scoring_strategy("additive", lambda: AdditiveScoringStrategy())
+
+
+class TestRegistryLifecycle:
+    def test_unregister_removes_custom_strategy(self):
+        register_scoring_strategy("test-ephemeral", lambda: AdditiveScoringStrategy())
+        assert "test-ephemeral" in available_strategies()
+        unregister_scoring_strategy("test-ephemeral")
+        assert "test-ephemeral" not in available_strategies()
+
+    def test_unregister_unknown_raises(self):
+        with pytest.raises(KeyError):
+            unregister_scoring_strategy("never-registered")
+
+    @pytest.mark.parametrize("builtin", ["additive", "dampened"])
+    def test_cannot_unregister_builtin(self, builtin):
+        with pytest.raises(ValueError, match="built-in"):
+            unregister_scoring_strategy(builtin)
+        # The built-in survives the failed attempt.
+        assert builtin in available_strategies()
+
+    def test_temporary_strategy_cleans_up_on_error(self):
+        name = "test-raises"
+        with pytest.raises(RuntimeError):
+            with temporary_strategy(name, lambda: AdditiveScoringStrategy()):
+                assert name in available_strategies()
+                raise RuntimeError("boom")
+        # Registry is restored even though the body raised.
+        assert name not in available_strategies()
+
+    def test_temporary_strategy_yields_normalized_name(self):
+        with temporary_strategy("  spaced-name  ", lambda: AdditiveScoringStrategy()) as key:
+            assert key == "spaced-name"
+            assert key in available_strategies()
+
+    @pytest.mark.parametrize("bad_name", ["", "   ", "\t"])
+    def test_register_rejects_blank_name(self, bad_name):
+        with pytest.raises(ValueError, match="non-empty"):
+            register_scoring_strategy(bad_name, lambda: AdditiveScoringStrategy())
+
+    def test_register_strips_surrounding_whitespace(self):
+        with temporary_strategy("  padded  ", lambda: AdditiveScoringStrategy()):
+            # Looked up under the stripped key, and the padded form resolves too.
+            assert "padded" in available_strategies()
+            assert isinstance(create_scoring_strategy(" padded "), AdditiveScoringStrategy)
+
+    def test_register_rejects_non_callable_builder(self):
+        with pytest.raises(TypeError):
+            register_scoring_strategy("test-not-callable", "not a builder")  # type: ignore[arg-type]
+        assert "test-not-callable" not in available_strategies()
+
+    def test_create_with_blank_name_raises(self):
+        with pytest.raises(ValueError, match="non-empty"):
+            create_scoring_strategy("   ")
+
+
+class TestBounds:
+    @pytest.mark.parametrize(
+        "value, expected",
+        [
+            (0.0, 0),
+            (12.5, 13),
+            (12.4, 12),
+            (2.5, 3),  # half away from zero, not banker's rounding where
+            (0.5, 1),  # round(2.5) == 2 and round(0.5) == 0
+            (-0.5, -1),  # symmetric: a half below zero rounds away to -1
+            (-1.5, -2),
+        ],
+    )
+    def test_round_half_up(self, value, expected):
+        assert round_half_up(value) == expected
+
+    @pytest.mark.parametrize("bad_value", [float("nan"), float("inf"), float("-inf")])
+    def test_round_half_up_rejects_non_finite(self, bad_value):
+        with pytest.raises(ValueError, match="non-finite"):
+            round_half_up(bad_value)
+
+    def test_clamp_floors_negative(self):
+        assert clamp_score(-10.0) == SCORE_FLOOR
+        assert clamp_score(-0.4) == SCORE_FLOOR
+
+    def test_clamp_rounds_and_passes_through_positive(self):
+        assert clamp_score(47.5) == 48
+        assert clamp_score(150.0) == 150
+
+    def test_score_floor_is_zero(self):
+        assert SCORE_FLOOR == 0
 
 
 class TestProtocolConformance:

@@ -17,18 +17,20 @@ Two implementations ship today:
   of them should not blow the score past the thresholds on its own.
 
 Strategies deliberately return a plain ``int`` on the same 0-100ish point scale
-the thresholds in :mod:`app.domain.fraud` use. Mapping that score to a risk
-level and status stays centralised in
+the thresholds in :mod:`app.domain.fraud` use, clamped non-negative (see
+:mod:`app.services.fraud.bounds`) so a malformed rule cannot produce a score
+that :meth:`~app.domain.fraud.RiskAssessment.classify` would reject. Mapping that
+score to a risk level and status stays centralised in
 :meth:`~app.domain.fraud.RiskAssessment.from_score`.
 """
 
 from __future__ import annotations
 
-import math
 from dataclasses import dataclass
 from typing import ClassVar, Protocol, Sequence, runtime_checkable
 
 from app.domain.fraud import RuleOutcome
+from app.services.fraud.bounds import clamp_score
 
 
 @runtime_checkable
@@ -37,7 +39,9 @@ class ScoringStrategy(Protocol):
 
     Implementations must expose a ``name`` identifying the policy and a
     :meth:`score` that is a pure function of the outcomes passed to it. Scores
-    are non-negative and live on the same point scale as the risk thresholds.
+    are non-negative and live on the same point scale as the risk thresholds;
+    implementations guarantee that by funnelling their aggregate through
+    :func:`~app.services.fraud.bounds.clamp_score`.
     """
 
     name: str
@@ -55,16 +59,6 @@ def _triggered_points(outcomes: Sequence[RuleOutcome]) -> list[int]:
     )
 
 
-def _round_half_up(value: float) -> int:
-    """Round a non-negative value to the nearest int, halves rounding up.
-
-    ``round`` uses banker's rounding, which makes half-point scores depend on
-    the parity of the integer part. Risk scores are easier to reason about with
-    deterministic half-up rounding.
-    """
-    return int(math.floor(value + 0.5))
-
-
 @dataclass(frozen=True)
 class AdditiveScoringStrategy:
     """Sum the points of every rule that fired.
@@ -76,7 +70,8 @@ class AdditiveScoringStrategy:
     name: ClassVar[str] = "additive"
 
     def score(self, outcomes: Sequence[RuleOutcome]) -> int:
-        return sum(outcome.awarded_points for outcome in outcomes)
+        total = sum(outcome.awarded_points for outcome in outcomes)
+        return clamp_score(total)
 
 
 @dataclass(frozen=True)
@@ -102,4 +97,4 @@ class DampenedScoringStrategy:
         total = 0.0
         for rank, points in enumerate(_triggered_points(outcomes)):
             total += points * (self.decay**rank)
-        return _round_half_up(total)
+        return clamp_score(total)

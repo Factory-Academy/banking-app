@@ -143,3 +143,83 @@ No wiring to runtime config or an API parameter, and no retuning of thresholds
 for the dampened curve. The integration point is the service constructor /
 `with_strategy`; exposing strategy choice to operators would be the next step if
 this graduates from a spike.
+
+---
+
+# Follow-up: review feedback
+
+Two edge cases raised in review on the spike PR, addressed as a focused
+follow-up.
+
+## 1. Strategies now guarantee a non-negative, in-range score
+
+**Why.** The strategies trusted that every `RuleOutcome` carried sane
+`risk_points`. A rule with negative or malformed points (a future rule, a
+mis-tuned custom one, a test double) could drive a strategy's aggregate below
+zero. That score feeds `RiskAssessment.classify`, which *rejects* a negative
+score with `ValueError`, so a single bad rule would turn a routine
+`POST /transactions` into a 500 rather than degrading gracefully.
+
+**What changed.** Rounding and clamping moved into one shared module,
+`app/services/fraud/bounds.py`:
+
+| Symbol | Role |
+| --- | --- |
+| `SCORE_FLOOR` (0) | lowest score any strategy may emit |
+| `round_half_up(value)` | deterministic half-away-from-zero rounding, total over all finite inputs, rejects NaN/inf |
+| `clamp_score(value)` | `round_half_up` then floor at `SCORE_FLOOR` |
+
+Both `AdditiveScoringStrategy` and `DampenedScoringStrategy` now funnel their
+aggregate through `clamp_score`, so the protocol's "scores are non-negative"
+promise is enforced rather than assumed. `round_half_up` (previously the private
+`_round_half_up` in `scoring.py`) moved here so additive and dampened share one
+rounding rule.
+
+**Deliberately no upper cap.** Additive can legitimately exceed 100 when many
+rules fire (all six today sum to 200), and preserving that magnitude keeps the
+score explainable to an analyst ("these five rules added up to 185"). Only the
+LOW/MEDIUM/HIGH *thresholds* are bounded, and those stay in `app.domain.fraud`.
+Clamping is one-sided: floor only.
+
+**Behaviour-preserving.** Every shipping rule carries positive points, so the
+floor never bites on real traffic; scores for well-formed input are unchanged.
+
+## 2. Public registry lifecycle instead of poking `_REGISTRY`
+
+**Why.** The only way to undo a `register_scoring_strategy` was to reach into
+`factory._REGISTRY` (the tests did `_REGISTRY.pop(...)` in a `finally`). That
+leaks a private detail into tests and leaves no safe cleanup for extensions.
+`register_scoring_strategy` also accepted any `name`, including `""`.
+
+**What changed** in `app/services/fraud/factory.py`:
+
+- `unregister_scoring_strategy(name)` — the public inverse. Raises `ValueError`
+  for a built-in (`additive`/`dampened` must stay available for the live
+  service) and `KeyError` for a name that was never registered, so a buggy
+  cleanup surfaces instead of passing silently.
+- `temporary_strategy(name, builder)` — a context manager that registers on
+  entry and unregisters on exit *even if the body raises*. The custom-strategy
+  test now uses this instead of a manual `try/finally` on private state.
+- Name validation (`_normalize_name`): blank/whitespace-only names are rejected
+  at `register`/`create`/`unregister`, surrounding whitespace is stripped so
+  `"dampened "` and `"dampened"` cannot register as two policies, and a
+  non-`str` name raises `TypeError`. `register` also rejects a non-callable
+  builder up front.
+- `_BUILTIN_STRATEGIES` records the shipped names so they cannot be
+  unregistered out from under the service.
+
+## Edge cases added to `tests/test_fraud_scoring.py`
+
+- Additive and dampened clamp a negative-points outcome to `SCORE_FLOOR`; a
+  large additive sum (150) is *not* capped.
+- `round_half_up`: half-away-from-zero vs `round`'s banker's rounding
+  (`2.5 -> 3`, `0.5 -> 1`), the negative branch (`-0.5 -> -1`), and rejection of
+  NaN/inf. `clamp_score` floors negatives and passes positives through.
+- Registry lifecycle: `unregister` removes a custom strategy, raises on an
+  unknown name, and refuses every built-in (which survives the attempt);
+  `temporary_strategy` cleans up on error and yields the normalised name; blank
+  names and non-callable builders are rejected; a padded name resolves to its
+  stripped form.
+
+The existing custom-strategy test was rewritten onto `temporary_strategy`, so no
+test reaches into `_REGISTRY` any more.
